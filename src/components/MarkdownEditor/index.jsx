@@ -8,7 +8,7 @@ class MarkdownEditor extends React.Component {
   constructor(props) {
     super(props);
     this.handleChange = this.handleChange.bind(this);
-    this.state = { value: 'Hello, **world**!' };
+    this.state = { value: 'Hello, **world**!' , qrcode: this.props.qrcode };
   }
 
   handleChange(e) {
@@ -26,6 +26,8 @@ class MarkdownEditor extends React.Component {
   }
 
   render() {
+    let { qrcode } = this.props;
+    function createMarkup() { return {__html: qrcode}; };
     return (
       <Row justify="center" gutter={24}>
         <Col span={12}><Input.TextArea rows="20"
@@ -33,8 +35,15 @@ class MarkdownEditor extends React.Component {
           onChange={this.handleChange}
           defaultValue={this.state.value}
         /></Col>
-        <Col span={12} className="content"
-          dangerouslySetInnerHTML={this.getRawMarkup()}></Col>
+        <Col span={12} className="content">
+
+          <Row >
+           <Col span={24} dangerouslySetInnerHTML={this.getRawMarkup()} ></Col>
+           <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center'}} span={24} dangerouslySetInnerHTML={createMarkup()} ></Col>
+
+          </Row>
+        </Col>
+       
       </Row>
     );
   }
