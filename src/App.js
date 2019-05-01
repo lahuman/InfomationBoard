@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useCallback } from 'react';
 import { Layout, Menu } from 'antd';
 import MarkdownEditor from './components/MarkdownEditor'
 import QrCodeGen from './components/QrCodeGen';
@@ -6,24 +6,16 @@ import QrCodeGen from './components/QrCodeGen';
 const { Header, Content, Footer } = Layout;
 
 
-class App extends React.Component {
-  constructor(props) {
-    super(props);
-    this.appendMkEditorValue = this.appendMkEditorValue.bind(this);
-    this.qrcode = this.qrcode.bind(this);
-    this.state = {
-      qrcode: "<img src='https://lahuman.github.io/assets/img/logo.png' width='100px' />"
-    };
-  }
-  qrcode(){
-    return this.state.qrcode;
-  }
-  appendMkEditorValue(qrcodeImgTag) {
-    this.setState({qrcode: qrcodeImgTag});
-  }
+const App = () =>  {
 
-  render() {
-    let {qrcode} = this.state
+  const [qrcode, setQrcode] = useState(`<img src='https://lahuman.github.io/assets/img/logo.png' width='100px' />`);
+  
+  const callbackFunction = useCallback(() => {
+    console.log(qrcode, "callback called");
+    // Do something with callbackCount ...
+    return qrcode;
+  }, [qrcode]);
+
     return (
       <Layout>
         <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
@@ -42,8 +34,8 @@ class App extends React.Component {
 
         <Content style={{ padding: '0 50px', marginTop: 64 }}>
           <div style={{ background: '#fff', padding: 24, minHeight: 380 }}>
-            <QrCodeGen callGenQRCode={this.appendMkEditorValue} />
-            <MarkdownEditor qrcode={this.qrcode()} />
+            <QrCodeGen action={setQrcode} />
+            <MarkdownEditor qrcode={qrcode} />
           </div>
         </Content>
 
@@ -53,6 +45,5 @@ class App extends React.Component {
       </Layout>
     );
   }
-}
 
 export default App;
