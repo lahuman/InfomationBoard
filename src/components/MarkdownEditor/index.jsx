@@ -2,11 +2,12 @@
 import React, { useState } from 'react'
 import Remarkable from 'remarkable';
 import { Row, Col, Input } from 'antd';
-
+import {BoardContext} from '../context';
 
 const MarkdownEditor = (props) => {
+  console.log('render markdowneditor');
   const [value, setValue] = useState('Hello, **world**!');
-  const qrcod = props.qrcode;
+  const [qrcode, ] = React.useContext(BoardContext);
 
   const handleChange = (e) => {
     setValue(e.target.value);
@@ -22,8 +23,6 @@ const MarkdownEditor = (props) => {
     return { __html: md.render(value) };
   }
 
-
-  function createMarkup() { return { __html: qrcod }; };
   return (
     <Row justify="center" gutter={24}>
       <Col span={12}><Input.TextArea rows="20"
@@ -35,7 +34,11 @@ const MarkdownEditor = (props) => {
 
         <Row >
           <Col span={24} dangerouslySetInnerHTML={getRawMarkup()} ></Col>
-          <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24} dangerouslySetInnerHTML={createMarkup()} ></Col>
+          <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24}>
+            {qrcode && (
+              <img src={qrcode} alt="" />
+            )}
+          </Col>
 
         </Row>
       </Col>
