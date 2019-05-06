@@ -6,11 +6,11 @@ import {BoardContext} from '../context';
 
 const MarkdownEditor = (props) => {
   console.log('render markdowneditor');
-  const [value, setValue] = useState('Hello, **world**!');
-  const [qrcode, ] = React.useContext(BoardContext);
+ 
+  const  [markdown, setMarkdown] = React.useContext(BoardContext);
 
   const handleChange = (e) => {
-    setValue(e.target.value);
+    setMarkdown({md:e.target.value, qrcode:markdown.qrcode});
   }
 
   const getRawMarkup = () => {
@@ -20,7 +20,7 @@ const MarkdownEditor = (props) => {
       typographer: true,
     });
 
-    return { __html: md.render(value) };
+    return { __html: md.render(markdown.md) };
   }
 
   return (
@@ -28,15 +28,15 @@ const MarkdownEditor = (props) => {
       <Col span={12}><Input.TextArea rows="20"
         id="markdown-content"
         onChange={handleChange}
-        defaultValue={value}
+        defaultValue={markdown.md}
       /></Col>
       <Col span={12} className="content">
 
         <Row >
           <Col span={24} dangerouslySetInnerHTML={getRawMarkup()} ></Col>
           <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24}>
-            {qrcode && (
-              <img src={qrcode} alt="" />
+            {markdown.qrcode && (
+              <img src={markdown.qrcode} alt="" />
             )}
           </Col>
 

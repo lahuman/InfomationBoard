@@ -5,14 +5,14 @@ import { BoardContext } from '../context';
 
 const Search = Input.Search;
 
-const qrGen = (targetUrl, cb) => {
+const qrGen = (targetUrl, mk, cb) => {
   QRCode.toDataURL(targetUrl, function (err, url) {
-    cb(url);
+    cb({md:mk.md, qrcode: url});
   })
 }
 
 const QrCodeGen = (props) => {
-  const [, setQrcode] = React.useContext(BoardContext);
+  const [markdown, setMarkdown] = React.useContext(BoardContext);
 
   return (
     <Row justify="center" gutter={24}>
@@ -22,7 +22,7 @@ const QrCodeGen = (props) => {
           enterButton="Generator"
           size="large"
           defaultValue="http://"
-          onSearch={value => qrGen(value, setQrcode)}
+          onSearch={value => qrGen(value, markdown, setMarkdown)}
         />
       </Col>
     </Row>

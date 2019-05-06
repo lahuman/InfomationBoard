@@ -9,8 +9,10 @@ const { Header, Content, Footer } = Layout;
 
 const App = () => {
 
-  const [qrcode, setQrcode] = useState(`https://lahuman.github.io/assets/img/logo.png`);
-  const boardContextValue = React.useMemo(() => [qrcode, setQrcode], [qrcode, setQrcode]);
+  const [markdown, setMarkdown] = useState({qrcode: `https://lahuman.github.io/assets/img/logo.png`, 
+  md: 'Hello, **world**!'});
+  const boardContextValue = React.useMemo(() => [markdown, setMarkdown], [markdown, setMarkdown]);
+
   return (
     <Layout>
       <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
