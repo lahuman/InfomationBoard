@@ -1,18 +1,18 @@
 import React from 'react';
 import { Row, Col, Input } from 'antd';
 import QRCode from 'qrcode';
-import { BoardContext } from '../context';
+import { QrContext  } from '../context';
 
 const Search = Input.Search;
 
-const qrGen = (targetUrl, mk, cb) => {
+const qrGen = (targetUrl, cb) => {
   QRCode.toDataURL(targetUrl, function (err, url) {
-    cb({md:mk.md, qrcode: url});
+    cb(url);
   })
 }
 
 const QrCodeGen = (props) => {
-  const [markdown, setMarkdown] = React.useContext(BoardContext);
+  const [, setQr] = React.useContext(QrContext);
 
   return (
     <Row justify="center" gutter={24}>
@@ -22,7 +22,7 @@ const QrCodeGen = (props) => {
           enterButton="Generator"
           size="large"
           defaultValue="http://"
-          onSearch={value => qrGen(value, markdown, setMarkdown)}
+          onSearch={value => qrGen(value, setQr)}
         />
       </Col>
     </Row>

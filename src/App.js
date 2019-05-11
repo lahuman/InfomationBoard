@@ -1,55 +1,39 @@
-import React, { useState } from 'react';
-import { Layout, Menu } from 'antd';
-import MarkdownEditor from './components/MarkdownEditor'
+import React from 'react';
+import { Layout } from 'antd';
+import { MdProvider, QrProvider } from './components/context';
+import MarkdownEditor from './components/MarkdownEditor';
 import QrCodeGen from './components/QrCodeGen';
-import { BoardContext } from './components/context';
+import Header from './components/Header';
 
-const { Header, Content, Footer } = Layout;
+const { Content, Footer } = Layout;
 
 
 const App = () => {
+  
 
-  const [markdown, setMarkdown] = useState({
-    qrcode: `https://lahuman.github.io/assets/img/logo.png`,
-    md: 'Hello, **world**!'
-  });
-  const boardContextValue = React.useMemo(() => [markdown, setMarkdown], [markdown, setMarkdown]);
-  const downloadFile = () => {
-    const element = document.createElement("a");
-    const file = new Blob([JSON.stringify(markdown)], { type: 'text/plain' });
-    element.href = URL.createObjectURL(file);
-    element.download = "information.json";
-    document.body.appendChild(element); // Required for this to work in FireFox
-    element.click();
-  }
+  const AppProvider = ({ contexts, children }) => contexts.reduce(
+    (prev, context) => React.createElement(context, {
+      children: prev
+    }),
+    children
+  );
 
-  const unSelectedMenu = ({ item, key, selectedKeys }) => {
-      console.log(item)
-  }
+
   return (
     <Layout>
-      <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
-        <div className="logo" />
-        <Menu
-          theme="dark"
-          mode="horizontal"
-          defaultSelectedKeys={['0']}
-          onSelect={unSelectedMenu}
-          style={{ lineHeight: '64px' }}
-        >
-          <Menu.Item key="1" onClick={downloadFile}>저장</Menu.Item>
-          <Menu.Item key="2">불러오기</Menu.Item>
-          <Menu.Item key="3">안내판 쇼</Menu.Item>
-        </Menu>
-      </Header>
-      <BoardContext.Provider value={boardContextValue} >
+       <AppProvider
+        contexts={[MdProvider, QrProvider]}
+      >
+        <Header />
+     
         <Content style={{ padding: '0 50px', marginTop: 64 }}>
           <div style={{ background: '#fff', padding: 24, minHeight: 380 }}>
             <QrCodeGen />
             <MarkdownEditor />
           </div>
         </Content>
-      </BoardContext.Provider>
+      </AppProvider>
+
 
       <Footer style={{ textAlign: 'center' }}>
         InformationBoard ©2019 Created by lahuman
