@@ -12,7 +12,7 @@ const qrGen = (targetUrl, cb) => {
 }
 
 const QrCodeGen = (props) => {
-  const [, setQr] = React.useContext(QrContext);
+  const [qr, setQr] = React.useContext(QrContext);
 
   return (
     <Row justify="center" gutter={24}>
@@ -21,7 +21,7 @@ const QrCodeGen = (props) => {
           placeholder="QR URL"
           enterButton="Generator"
           size="large"
-          defaultValue="http://"
+          defaultValue={qr}
           onSearch={value => qrGen(value, setQr)}
         />
       </Col>

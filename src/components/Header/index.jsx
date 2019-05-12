@@ -12,6 +12,8 @@ const HeaderMenu = (props) => {
   const [md, setMd] = React.useContext(MdContext);
   const [qr, setQr] = React.useContext(QrContext);
   const [visible, setVisible] = useState(false);
+  const [uploadVal, setUploadVal] = useState({});
+  const [okDisabled, setOkDisabled] = useState(true);
 
   const downloadFile = () => {
     const element = document.createElement("a");
@@ -22,10 +24,20 @@ const HeaderMenu = (props) => {
     element.click();
   }
   const uploadFile = () => {
+    setOkDisabled(true);
     setVisible(true);
   }
-  const isOk = () => {
+  const onOk = () => {
     setVisible(false);
+    setMd(uploadVal.md);
+    setQr(uploadVal.qr);
+  }
+  const onCancel = () => {
+    setVisible(false);
+  }
+  const fileuploaded = 	(error, file) => {
+    setUploadVal(JSON.parse(file.serverId));
+    setOkDisabled(false);
   }
   return (
     <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
@@ -43,9 +55,10 @@ const HeaderMenu = (props) => {
       <Modal
           title="File Upload"
           visible={visible}
-          onCancel={isOk}
-          okButtonProps={{disabled: true}} >
-          <FilePond/>
+          onCancel={onCancel}
+          onOk={onOk}
+          okButtonProps={{disabled: okDisabled}} >
+          <FilePond  name={"file"} server="http://localhost:3001/upload" onprocessfile={fileuploaded} />
         </Modal>
     </Header>
   );

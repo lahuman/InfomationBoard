@@ -2,6 +2,7 @@
 import React from 'react'
 import Remarkable from 'remarkable';
 import { Row, Col, Input } from 'antd';
+import QRCode from 'qrcode';
 import {MdContext, QrContext} from '../context';
 
 const MarkdownEditor = (props) => {
@@ -11,6 +12,11 @@ const MarkdownEditor = (props) => {
   const [qr, ] = React.useContext(QrContext);
   const handleChange = (e) => {
     setMd(e.target.value);
+  }
+  const convertQr = () => {
+    QRCode.toDataURL(qr, function (err, url) {
+      return (url);  
+    })
   }
 
   const getRawMarkup = () => {
@@ -31,7 +37,6 @@ const MarkdownEditor = (props) => {
         defaultValue={md}
       /></Col>
       <Col span={12} className="content">
-
         <Row >
           <Col span={24} dangerouslySetInnerHTML={getRawMarkup()} ></Col>
           <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24}>
