@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Layout, Menu, Modal } from 'antd';
-import { MdContext, QrContext } from '../context';
-
+import { MdContext, QrContext, UrlContext } from '../context';
+import QRCode from 'qrcode';
 
 import { FilePond } from 'react-filepond';
 import 'filepond/dist/filepond.min.css';
@@ -11,6 +11,8 @@ const { Header } = Layout;
 const HeaderMenu = (props) => {
   const [md, setMd] = React.useContext(MdContext);
   const [qr, setQr] = React.useContext(QrContext);
+  const [, setUrl] = React.useContext(UrlContext);
+  
   const [visible, setVisible] = useState(false);
   const [uploadVal, setUploadVal] = useState({});
   const [okDisabled, setOkDisabled] = useState(true);
@@ -31,6 +33,9 @@ const HeaderMenu = (props) => {
     setVisible(false);
     setMd(uploadVal.md);
     setQr(uploadVal.qr);
+    QRCode.toDataURL(uploadVal.qr, function (err, url) {
+      setUrl(url);
+    });
   }
   const onCancel = () => {
     setVisible(false);

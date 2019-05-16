@@ -3,20 +3,15 @@ import React from 'react'
 import Remarkable from 'remarkable';
 import { Row, Col, Input } from 'antd';
 import QRCode from 'qrcode';
-import {MdContext, QrContext} from '../context';
+import {MdContext, UrlContext} from '../context';
 
 const MarkdownEditor = (props) => {
   console.log('render markdowneditor');
  
   const  [md, setMd] = React.useContext(MdContext);
-  const [qr, ] = React.useContext(QrContext);
+  const [url, ] = React.useContext(UrlContext);
   const handleChange = (e) => {
     setMd(e.target.value);
-  }
-  const convertQr = () => {
-    QRCode.toDataURL(qr, function (err, url) {
-      return (url);  
-    })
   }
 
   const getRawMarkup = () => {
@@ -34,14 +29,15 @@ const MarkdownEditor = (props) => {
       <Col span={12}><Input.TextArea rows="20"
         id="markdown-content"
         onChange={handleChange}
-        defaultValue={md}
+        value={md}
+        
       /></Col>
       <Col span={12} className="content">
         <Row >
           <Col span={24} dangerouslySetInnerHTML={getRawMarkup()} ></Col>
           <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24}>
-            {qr && (
-              <img src={qr} alt="" />
+            {url && (
+              <img src={url} alt="" />
             )}
           </Col>
 

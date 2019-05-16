@@ -1,6 +1,6 @@
 import React from 'react';
 import { Layout } from 'antd';
-import { MdProvider, QrProvider } from './components/context';
+import { MdProvider, QrProvider, UrlProvider } from './components/context';
 import MarkdownEditor from './components/MarkdownEditor';
 import QrCodeGen from './components/QrCodeGen';
 import Header from './components/Header';
@@ -22,7 +22,7 @@ const App = () => {
   return (
     <Layout>
        <AppProvider
-        contexts={[MdProvider, QrProvider]}
+        contexts={[MdProvider, QrProvider, UrlProvider]}
       >
         <Header />
      
