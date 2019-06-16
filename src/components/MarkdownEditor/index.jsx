@@ -1,15 +1,19 @@
 
-import React from 'react'
+import React, {useState} from 'react'
 import Remarkable from 'remarkable';
 import { Row, Col, Input } from 'antd';
+import Fullscreen from "react-full-screen";
 
-import {MdContext, UrlContext} from '../context';
+import {MdContext, UrlContext, FullContext} from '../context';
+
+import './fullcss.css';
 
 const MarkdownEditor = (props) => {
-  console.log('render markdowneditor');
  
   const  [md, setMd] = React.useContext(MdContext);
   const [url, ] = React.useContext(UrlContext);
+  const [isFull, setIsFull] = React.useContext(FullContext);
+  // const [isFull, setIsFull] = React.useState(true);
   const handleChange = (e) => {
     setMd(e.target.value);
   }
@@ -33,7 +37,12 @@ const MarkdownEditor = (props) => {
         
       /></Col>
       <Col span={12} className="content">
-        <Row >
+        <Fullscreen className="fullscreen-enabled"
+            enabled={isFull}
+            onChange={iFl => setIsFull(iFl)}
+
+          >
+        <Row className="my-component">
           <Col span={24} dangerouslySetInnerHTML={getRawMarkup()} ></Col>
           <Col style={{ display: 'inline-flex', justifyContent: 'center', alignItems: 'center' }} span={24}>
             {url && (
@@ -42,6 +51,7 @@ const MarkdownEditor = (props) => {
           </Col>
 
         </Row>
+        </Fullscreen>
       </Col>
 
     </Row>

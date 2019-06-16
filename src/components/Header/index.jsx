@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Layout, Menu } from 'antd';
-import { MdContext, QrContext, UrlContext } from '../context';
+import { MdContext, QrContext, UrlContext, FullContext } from '../context';
 import QRCode from 'qrcode';
 
 import FileModal from './FileModal';
@@ -11,11 +11,11 @@ const HeaderMenu = (props) => {
   const [md, setMd] = React.useContext(MdContext);
   const [qr, setQr] = React.useContext(QrContext);
   const [, setUrl] = React.useContext(UrlContext);
+  const [, setIsFull] = React.useContext(FullContext);
   
   const [visible, setVisible] = useState(false);
   const [uploadVal, setUploadVal] = useState({});
   const [okDisabled, setOkDisabled] = useState(true);
-  const [toggle, setToggle] = useState(true);
 
   const downloadFile = () => {
     const element = document.createElement("a");
@@ -26,7 +26,6 @@ const HeaderMenu = (props) => {
     element.click();
   }
   const uploadFile = () => {
-    setToggle(t=>!t);
     setOkDisabled(true);
     setVisible(true);
   }
@@ -45,6 +44,10 @@ const HeaderMenu = (props) => {
     setUploadVal(JSON.parse(file.serverId));
     setOkDisabled(false);
   }
+  
+  const showFull = () =>{
+    setIsFull(true);
+  }
   return (
     <Header style={{ position: 'fixed', zIndex: 1, width: '100%' }}>
       <div className="logo" />
@@ -56,9 +59,9 @@ const HeaderMenu = (props) => {
       >
         <Menu.Item key="1" onClick={downloadFile}>저장</Menu.Item>
         <Menu.Item key="2" onClick={uploadFile}>불러오기</Menu.Item>
-        <Menu.Item key="3">안내판 쇼</Menu.Item>
+        <Menu.Item key="3" onClick={showFull}>안내판 쇼</Menu.Item>
       </Menu>
-      <FileModal vals={{visible, okDisabled, toggle}} handles={{onCancel, onOk, fileuploaded}} />
+      <FileModal vals={{visible, okDisabled}} handles={{onCancel, onOk, fileuploaded}} />
       {/* <Modal
           title="File Upload"
           visible={visible}

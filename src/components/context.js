@@ -3,6 +3,7 @@ import React, { useState } from 'react';
 const MdContext = React.createContext();
 const QrContext = React.createContext();
 const UrlContext = React.createContext();
+const FullContext = React.createContext();
 
 const MdProvider = (props) => {
   const [md, setMd] = useState('Hello, **world**!');
@@ -64,6 +65,35 @@ const useQr = (WrappedComponent) => {
 }
 
 
+const FullProvider = (props) => {
+  const [isFull, setIsFull] = useState(false);
+  const fullContextValue = React.useMemo(() => [isFull, setIsFull], [isFull, setIsFull]);
+  return (
+    <FullContext.Provider value={fullContextValue}>
+      {props.children}
+    </FullContext.Provider>
+  );
+
+}
+
+const useFull = (WrappedComponent) => {
+  return function UseFull(props) {
+    return (
+      <FullContext.Consumer>
+        {
+          ({ isFull, setIsFull }) => (
+            <WrappedComponent
+              isFull={isFull}
+              setIsFull={setIsFull}
+            />
+          )
+        }
+      </FullContext.Consumer>
+    )
+  }
+}
+
+
 const UrlProvider = (props) => {
 
   const [url, setUrl] = useState('https://lahuman.github.io/assets/img/logo.png');
@@ -102,5 +132,8 @@ export {
   useQr,
   UrlContext,
   UrlProvider,
-  useUrl
+  useUrl,
+  FullContext,
+  FullProvider,
+  useFull
 } 
