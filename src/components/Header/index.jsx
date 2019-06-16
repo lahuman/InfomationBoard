@@ -1,10 +1,9 @@
 import React, { useState } from 'react';
-import { Layout, Menu, Modal } from 'antd';
+import { Layout, Menu } from 'antd';
 import { MdContext, QrContext, UrlContext } from '../context';
 import QRCode from 'qrcode';
 
-import { FilePond } from 'react-filepond';
-import 'filepond/dist/filepond.min.css';
+import FileModal from './FileModal';
 
 const { Header } = Layout;
 
@@ -16,6 +15,7 @@ const HeaderMenu = (props) => {
   const [visible, setVisible] = useState(false);
   const [uploadVal, setUploadVal] = useState({});
   const [okDisabled, setOkDisabled] = useState(true);
+  const [toggle, setToggle] = useState(true);
 
   const downloadFile = () => {
     const element = document.createElement("a");
@@ -26,6 +26,7 @@ const HeaderMenu = (props) => {
     element.click();
   }
   const uploadFile = () => {
+    setToggle(t=>!t);
     setOkDisabled(true);
     setVisible(true);
   }
@@ -57,14 +58,15 @@ const HeaderMenu = (props) => {
         <Menu.Item key="2" onClick={uploadFile}>불러오기</Menu.Item>
         <Menu.Item key="3">안내판 쇼</Menu.Item>
       </Menu>
-      <Modal
+      <FileModal vals={{visible, okDisabled, toggle}} handles={{onCancel, onOk, fileuploaded}} />
+      {/* <Modal
           title="File Upload"
           visible={visible}
           onCancel={onCancel}
           onOk={onOk}
           okButtonProps={{disabled: okDisabled}} >
-          <FilePond  name={"file"} server="http://localhost:3001/upload" onprocessfile={fileuploaded} />
-        </Modal>
+          <FilePond ref={fileForm} name={"file"} server="http://localhost:3001/upload" onprocessfile={fileuploaded} />
+        </Modal> */}
     </Header>
   );
 }

@@ -2,7 +2,7 @@
 import React from 'react'
 import Remarkable from 'remarkable';
 import { Row, Col, Input } from 'antd';
-import QRCode from 'qrcode';
+
 import {MdContext, UrlContext} from '../context';
 
 const MarkdownEditor = (props) => {
