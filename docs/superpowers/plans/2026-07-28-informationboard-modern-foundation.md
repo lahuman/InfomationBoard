@@ -6,7 +6,7 @@
 
 **Architecture:** One root Next.js App Router application replaces the separate frontend and upload server. Legacy sources move under `legacy/` as read-only migration reference, while focused `src/app`, `src/components`, and `src/lib` units provide the new runtime, validation, and test boundaries.
 
-**Tech Stack:** Next.js 16.2.12, React 19.2.8, TypeScript 7.0.2, Tailwind CSS 4.3.3, Zod 4.4.3, ESLint 10.8.0, Vitest 4.1.10, Testing Library 16.3.2, Playwright 1.62.0, npm
+**Tech Stack:** Next.js 16.2.12, React 19.2.8, TypeScript 6.0.3, Tailwind CSS 4.3.3, Zod 4.4.3, ESLint 10.8.0, Vitest 4.1.10, Testing Library 16.3.2, Playwright 1.62.0, npm
 
 ## Global Constraints
 
@@ -145,6 +145,7 @@ Append to `.gitignore`:
 /out/
 /test-results/
 /playwright-report/
+*.tsbuildinfo
 
 # Local environment
 .env
@@ -207,6 +208,10 @@ Write `package.json`:
   "name": "informationboard",
   "version": "0.2.0",
   "private": true,
+  "overrides": {
+    "postcss": "8.5.23",
+    "sharp": "0.35.3"
+  },
   "engines": {
     "node": ">=20.9.0"
   },
@@ -228,6 +233,7 @@ Write `package.json`:
     "zod": "4.4.3"
   },
   "devDependencies": {
+    "@eslint/js": "10.0.1",
     "@next/eslint-plugin-next": "16.2.12",
     "@tailwindcss/postcss": "4.3.3",
     "@testing-library/jest-dom": "7.0.0",
@@ -237,11 +243,10 @@ Write `package.json`:
     "@types/react-dom": "19.2.3",
     "@vitejs/plugin-react": "6.0.4",
     "eslint": "10.8.0",
-    "eslint-config-next": "16.2.12",
-    "jsdom": "30.0.0",
+    "jsdom": "29.1.1",
     "tailwindcss": "4.3.3",
-    "typescript": "7.0.2",
-    "vite-tsconfig-paths": "6.1.1",
+    "typescript": "6.0.3",
+    "typescript-eslint": "8.65.0",
     "vitest": "4.1.10"
   }
 }
@@ -288,7 +293,13 @@ Write `tsconfig.json`:
     "plugins": [{ "name": "next" }],
     "paths": { "@/*": ["./src/*"] }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "next-env.d.ts",
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    ".next/dev/types/**/*.ts"
+  ],
   "exclude": ["node_modules", "legacy"]
 }
 ```
@@ -308,6 +319,9 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  turbopack: {
+    root: process.cwd(),
+  },
 };
 
 export default nextConfig;
@@ -326,13 +340,15 @@ export default {
 Write `eslint.config.mjs`:
 
 ```js
+import eslint from "@eslint/js";
+import nextPlugin from "@next/eslint-plugin-next";
 import { defineConfig, globalIgnores } from "eslint/config";
-import nextVitals from "eslint-config-next/core-web-vitals";
-import nextTypeScript from "eslint-config-next/typescript";
+import tseslint from "typescript-eslint";
 
 export default defineConfig([
-  ...nextVitals,
-  ...nextTypeScript,
+  eslint.configs.recommended,
+  ...tseslint.configs.recommended,
+  nextPlugin.configs["core-web-vitals"],
   globalIgnores(["legacy/**", ".next/**", "coverage/**", "playwright-report/**"]),
 ]);
 ```
@@ -341,11 +357,16 @@ Write `vitest.config.ts`:
 
 ```ts
 import react from "@vitejs/plugin-react";
+import { fileURLToPath, URL } from "node:url";
 import { defineConfig } from "vitest/config";
-import tsconfigPaths from "vite-tsconfig-paths";
 
 export default defineConfig({
-  plugins: [react(), tsconfigPaths()],
+  plugins: [react()],
+  resolve: {
+    alias: {
+      "@": fileURLToPath(new URL("./src", import.meta.url)),
+    },
+  },
   test: {
     environment: "jsdom",
     setupFiles: ["./vitest.setup.ts"],
@@ -369,6 +390,7 @@ Create `src/app/page.test.tsx`:
 
 ```tsx
 import { render, screen } from "@testing-library/react";
+import { expect, it } from "vitest";
 import HomePage from "./page";
 
 it("introduces InformationBoard as a free beta", () => {
@@ -871,6 +893,9 @@ import { STATIC_SECURITY_HEADERS } from "./src/lib/security/policy";
 const nextConfig: NextConfig = {
   poweredByHeader: false,
   reactStrictMode: true,
+  turbopack: {
+    root: process.cwd(),
+  },
   async headers() {
     return [{ source: "/(.*)", headers: [...STATIC_SECURITY_HEADERS] }];
   },
@@ -920,6 +945,7 @@ Create `src/components/landing/hero.test.tsx`:
 
 ```tsx
 import { render, screen } from "@testing-library/react";
+import { expect, it } from "vitest";
 import { Hero } from "./hero";
 
 it("offers one clear sign-in action and beta status", () => {
@@ -936,6 +962,7 @@ Replace `src/app/page.test.tsx` with:
 
 ```tsx
 import { render, screen } from "@testing-library/react";
+import { expect, it } from "vitest";
 import HomePage from "./page";
 
 it("presents the three approved use cases", () => {
