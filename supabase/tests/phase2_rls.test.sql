@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(12);
+select plan(15);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -51,9 +51,26 @@ select lives_ok(
 );
 
 select results_eq(
+  $$ select revision from public.boards
+     where id = '30000000-0000-0000-0000-000000000003' $$,
+  array[1::bigint],
+  'a new board starts at revision one'
+);
+
+select results_eq(
   $$ select count(*)::bigint from public.boards $$,
   array[1::bigint],
   'owner can select the board'
+);
+
+select results_eq(
+  $$ update public.boards
+     set title = 'Updated owner board'
+     where id = '30000000-0000-0000-0000-000000000003'
+       and revision = 1
+     returning revision $$,
+  array[2::bigint],
+  'an owner update increments the board revision'
 );
 
 select lives_ok(
@@ -91,6 +108,19 @@ select results_eq(
   $$ select count(*)::bigint from public.attachments $$,
   array[0::bigint],
   'another user cannot read the attachment'
+);
+
+select results_eq(
+  $$ with changed as (
+       update public.boards
+       set title = 'Forged update'
+       where id = '30000000-0000-0000-0000-000000000003'
+         and revision = 2
+       returning 1
+     )
+     select count(*)::bigint from changed $$,
+  array[0::bigint],
+  'another user cannot update the board by revision'
 );
 
 select throws_ok(

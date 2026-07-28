@@ -94,6 +94,7 @@ export type Database = {
           id: string
           owner_id: string
           published_at: string | null
+          revision: number
           slug: string
           status: string
           summary: string
@@ -110,6 +111,7 @@ export type Database = {
           id?: string
           owner_id: string
           published_at?: string | null
+          revision?: number
           slug: string
           status?: string
           summary?: string
@@ -126,6 +128,7 @@ export type Database = {
           id?: string
           owner_id?: string
           published_at?: string | null
+          revision?: number
           slug?: string
           status?: string
           summary?: string
