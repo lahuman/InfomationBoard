@@ -1,6 +1,13 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(10);
+select plan(20);
+
+select has_function(
+  'public',
+  'publish_board_with_password',
+  array['uuid', 'bigint', 'text'],
+  'password publication uses an authenticated RPC boundary'
+);
 
 insert into auth.users (
   instance_id, id, aud, role, email, encrypted_password,
@@ -60,9 +67,83 @@ select results_eq(
   'publishing preserves the slug'
 );
 
-update public.boards
-set status = 'published', visibility = 'password'
-where id = '43000000-0000-4000-8000-000000000002';
+select results_eq(
+  $$ select revision
+     from public.publish_board_with_password(
+       '43000000-0000-4000-8000-000000000002',
+       1,
+       '$argon2id$test-hash'
+     ) $$,
+  array[2::bigint],
+  'password publication atomically advances the expected revision'
+);
+
+reset role;
+
+select results_eq(
+  $$ select password_hash from private.board_secrets
+     where board_id = '43000000-0000-4000-8000-000000000002' $$,
+  array['$argon2id$test-hash'::text],
+  'password publication stores only the supplied hash'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '41000000-0000-4000-8000-000000000001',
+  true
+);
+
+select is_empty(
+  $$ select revision
+     from public.publish_board_with_password(
+       '43000000-0000-4000-8000-000000000002',
+       1,
+       'replacement-hash'
+     ) $$,
+  'a stale revision cannot replace password publication state'
+);
+
+reset role;
+
+select results_eq(
+  $$ select password_hash from private.board_secrets
+     where board_id = '43000000-0000-4000-8000-000000000002' $$,
+  array['$argon2id$test-hash'::text],
+  'a stale publication cannot replace the existing hash'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '41000000-0000-4000-8000-000000000001',
+  true
+);
+
+select throws_ok(
+  $$ select * from public.publish_board_with_password(
+       '43000000-0000-4000-8000-000000000003',
+       1,
+       'plaintext-must-not-be-stored'
+     ) $$,
+  '23514',
+  null,
+  'password publication rejects a non-Argon2id value'
+);
+
+select results_eq(
+  $$ select status from public.boards
+     where id = '43000000-0000-4000-8000-000000000003' $$,
+  array['draft'::text],
+  'a rejected password value leaves the board unchanged'
+);
+
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '41000000-0000-4000-8000-000000000001',
+  true
+);
 
 select throws_ok(
   $$ update public.boards
@@ -76,6 +157,15 @@ select throws_ok(
 reset role;
 set local role anon;
 select set_config('request.jwt.claim.sub', '', true);
+
+select ok(
+  not has_function_privilege(
+    'anon',
+    'public.publish_board_with_password(uuid,bigint,text)',
+    'EXECUTE'
+  ),
+  'anonymous visitors cannot execute password publication'
+);
 
 select results_eq(
   $$ select slug from public.boards
@@ -126,7 +216,27 @@ select ok(
   'returning to draft clears published_at'
 );
 
+select throws_ok(
+  $$ update public.boards
+     set title = ' ', status = 'published', visibility = 'public'
+     where id = '43000000-0000-4000-8000-000000000003' $$,
+  '23514',
+  null,
+  'published boards require a non-empty title and body'
+);
+
+update public.boards
+set status = 'draft', visibility = 'private', allow_indexing = false
+where id = '43000000-0000-4000-8000-000000000002';
+
 reset role;
+
+select is_empty(
+  $$ select password_hash from private.board_secrets
+     where board_id = '43000000-0000-4000-8000-000000000002' $$,
+  'leaving password visibility removes the obsolete hash'
+);
+
 set local role anon;
 
 select results_eq(

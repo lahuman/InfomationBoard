@@ -177,7 +177,17 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      [_ in never]: never
+      publish_board_with_password: {
+        Args: {
+          p_board_id: string
+          p_password_hash: string
+          p_revision: number
+        }
+        Returns: {
+          revision: number
+          updated_at: string
+        }[]
+      }
     }
     Enums: {
       [_ in never]: never
