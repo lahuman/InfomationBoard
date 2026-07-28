@@ -1,8 +1,11 @@
+import { Hero } from "@/components/landing/hero";
+import { UseCases } from "@/components/landing/use-cases";
+
 export default function HomePage() {
   return (
     <main>
-      <p>무료 베타</p>
-      <h1>InformationBoard</h1>
+      <Hero />
+      <UseCases />
     </main>
   );
 }
