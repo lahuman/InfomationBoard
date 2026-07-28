@@ -2,6 +2,7 @@ import { act, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
 import { BoardEditor } from "./board-editor";
 import type { DeleteBoardResult } from "../actions/delete-board";
+import type { PublishBoardResult } from "../actions/publish-board";
 import type { UpdateBoardResult } from "../actions/update-board";
 import type { UpdateBoardInput } from "../schema";
 
@@ -16,6 +17,7 @@ vi.mock("next/navigation", () => ({
 
 const initialBoard = {
   id: "30000000-0000-4000-8000-000000000003",
+  slug: "summer-night-market",
   title: "여름 야시장",
   summary: "행사 요약",
   contentMarkdown: "# 안내",
@@ -27,6 +29,15 @@ const initialBoard = {
   },
   revision: 2,
   updatedAt: "2026-07-28T10:00:00.000Z",
+  status: "draft" as const,
+  visibility: "private" as const,
+  allowIndexing: false,
+  publishedAt: null,
+};
+
+const publicationProps = {
+  canonicalUrl: "https://boards.example/b/summer-night-market",
+  publishBoardAction: vi.fn(),
 };
 
 beforeEach(() => {
@@ -49,6 +60,7 @@ it("autosaves edited content after 750 ms", async () => {
   );
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={vi.fn()}
       updateBoardAction={update}
@@ -73,6 +85,47 @@ it("autosaves edited content after 750 ms", async () => {
   expect(window.localStorage.length).toBe(0);
 });
 
+it("uses the publication revision for the next autosave", async () => {
+  const publish = vi.fn(
+    async (): Promise<PublishBoardResult> => ({
+      status: "saved",
+      revision: 3,
+      updatedAt: "2026-07-28T10:01:00.000Z",
+    }),
+  );
+  const update = vi.fn(
+    async (): Promise<UpdateBoardResult> => ({
+      status: "saved",
+      revision: 4,
+      updatedAt: "2026-07-28T10:02:00.000Z",
+    }),
+  );
+  render(
+    <BoardEditor
+      board={initialBoard}
+      canonicalUrl={publicationProps.canonicalUrl}
+      deleteBoardAction={vi.fn()}
+      publishBoardAction={publish}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /전체 공개/ }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "게시 설정 저장" }));
+  });
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "게시 후 수정" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({ revision: 3, title: "게시 후 수정" }),
+  );
+});
+
 it("preserves local input when the server reports a conflict", async () => {
   const update = vi.fn(
     async (): Promise<UpdateBoardResult> => ({
@@ -86,6 +139,7 @@ it("preserves local input when the server reports a conflict", async () => {
   );
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={vi.fn()}
       updateBoardAction={update}
@@ -121,6 +175,7 @@ it("coalesces edits made while a save request is in flight", async () => {
     });
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={vi.fn()}
       updateBoardAction={update}
@@ -161,6 +216,7 @@ it("coalesces edits made while a save request is in flight", async () => {
 it("renders edit and preview tabs with the safe Markdown preview", () => {
   render(
     <BoardEditor
+      {...publicationProps}
       board={{
         ...initialBoard,
         contentMarkdown: "<script>alert(1)</script>\n\n# 안전한 안내",
@@ -183,6 +239,7 @@ it("requires explicit confirmation before deleting a board", () => {
   const remove = vi.fn();
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={remove}
       updateBoardAction={vi.fn()}
@@ -210,6 +267,7 @@ it("deletes after confirmation, clears recovery, and returns to dashboard", asyn
   );
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={remove}
       updateBoardAction={vi.fn()}
@@ -241,6 +299,7 @@ it("keeps the confirmation open when deletion fails", async () => {
   );
   render(
     <BoardEditor
+      {...publicationProps}
       board={initialBoard}
       deleteBoardAction={remove}
       updateBoardAction={vi.fn()}

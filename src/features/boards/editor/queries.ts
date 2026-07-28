@@ -15,7 +15,7 @@ export async function getBoardForEditor(
   const { data, error } = await supabase
     .from("boards")
     .select(
-      "id, title, summary, content_markdown, template, theme, revision, updated_at",
+      "id, slug, title, summary, content_markdown, template, theme, revision, updated_at, status, visibility, allow_indexing, published_at",
     )
     .eq("id", boardId)
     .eq("owner_id", ownerId)
@@ -24,4 +24,3 @@ export async function getBoardForEditor(
   if (error || !data) return null;
   return mapEditorBoardRow(data);
 }
-

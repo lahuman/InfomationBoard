@@ -26,6 +26,7 @@ beforeEach(() => {
   mocks.maybeSingle.mockResolvedValue({
     data: {
       id: "30000000-0000-4000-8000-000000000003",
+      slug: "summer-night-market",
       title: "여름 야시장",
       summary: "행사 요약",
       content_markdown: "# 안내",
@@ -37,6 +38,10 @@ beforeEach(() => {
       },
       revision: 2,
       updated_at: "2026-07-28T10:00:00.000Z",
+      status: "published",
+      visibility: "public",
+      allow_indexing: true,
+      published_at: "2026-07-28T09:00:00.000Z",
     },
     error: null,
   });
@@ -51,6 +56,7 @@ describe("getBoardForEditor", () => {
       ),
     ).resolves.toEqual({
       id: "30000000-0000-4000-8000-000000000003",
+      slug: "summer-night-market",
       title: "여름 야시장",
       summary: "행사 요약",
       contentMarkdown: "# 안내",
@@ -62,7 +68,14 @@ describe("getBoardForEditor", () => {
       },
       revision: 2,
       updatedAt: "2026-07-28T10:00:00.000Z",
+      status: "published",
+      visibility: "public",
+      allowIndexing: true,
+      publishedAt: "2026-07-28T09:00:00.000Z",
     });
+    expect(mocks.select).toHaveBeenCalledWith(
+      "id, slug, title, summary, content_markdown, template, theme, revision, updated_at, status, visibility, allow_indexing, published_at",
+    );
     expect(mocks.from).toHaveBeenCalledWith("boards");
     expect(mocks.eqId).toHaveBeenCalledWith(
       "id",
@@ -84,4 +97,3 @@ describe("getBoardForEditor", () => {
     ).resolves.toBeNull();
   });
 });
-

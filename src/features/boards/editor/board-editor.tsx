@@ -3,9 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import type { DeleteBoardResult } from "../actions/delete-board";
+import type {
+  PublishBoardResult,
+} from "../actions/publish-board";
 import { BoardMarkdown } from "../markdown/board-markdown";
-import type { UpdateBoardInput } from "../schema";
+import type { PublicationInput, UpdateBoardInput } from "../schema";
 import type { UpdateBoardResult } from "../actions/update-board";
+import { PublicationSettings } from "../publication/publication-settings";
 import type { EditorBoard, EditorDraft } from "./editor-board";
 import {
   clearRecoveryCopy,
@@ -35,7 +39,11 @@ const saveLabels: Record<SaveState, string> = {
 
 type BoardEditorProps = {
   board: EditorBoard;
+  canonicalUrl: string;
   deleteBoardAction: (input: { id: string }) => Promise<DeleteBoardResult>;
+  publishBoardAction: (
+    input: PublicationInput,
+  ) => Promise<PublishBoardResult>;
   updateBoardAction: (
     input: UpdateBoardInput,
   ) => Promise<UpdateBoardResult>;
@@ -52,7 +60,9 @@ function toDraft(board: EditorBoard): EditorDraft {
 
 export function BoardEditor({
   board,
+  canonicalUrl,
   deleteBoardAction,
+  publishBoardAction,
   updateBoardAction,
 }: BoardEditorProps) {
   const router = useRouter();
@@ -418,6 +428,16 @@ export function BoardEditor({
           <BoardMarkdown markdown={draft.contentMarkdown} />
         </section>
       </div>
+
+      <PublicationSettings
+        board={board}
+        canonicalUrl={canonicalUrl}
+        onRevisionChange={(nextRevision) => {
+          revisionRef.current = nextRevision;
+          setRevision(nextRevision);
+        }}
+        publishBoardAction={publishBoardAction}
+      />
 
       <section className="editor-danger-zone" aria-labelledby="danger-title">
         <div>

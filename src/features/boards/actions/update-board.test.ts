@@ -105,6 +105,7 @@ describe("updateBoard", () => {
     mocks.conflictMaybeSingle.mockResolvedValue({
       data: {
         id: input.id,
+        slug: "summer-night-market",
         title: "서버의 최신 행사",
         summary: "서버 요약",
         content_markdown: "# 서버",
@@ -112,6 +113,10 @@ describe("updateBoard", () => {
         theme: input.theme,
         revision: 4,
         updated_at: "2026-07-28T10:02:00.000Z",
+        status: "published",
+        visibility: "public",
+        allow_indexing: true,
+        published_at: "2026-07-28T09:00:00.000Z",
       },
       error: null,
     });
@@ -123,6 +128,9 @@ describe("updateBoard", () => {
         revision: 4,
       },
     });
+    expect(mocks.conflictSelect).toHaveBeenCalledWith(
+      "id, slug, title, summary, content_markdown, template, theme, revision, updated_at, status, visibility, allow_indexing, published_at",
+    );
   });
 
   it("returns not found without revealing a foreign board", async () => {
@@ -149,4 +157,3 @@ describe("updateBoard", () => {
     expect(mocks.requireUser).not.toHaveBeenCalled();
   });
 });
-

@@ -32,11 +32,22 @@ vi.mock("@/features/boards/actions/delete-board", () => ({
   deleteBoard: vi.fn(),
 }));
 
+vi.mock("@/features/boards/actions/publish-board", () => ({
+  publishBoard: vi.fn(),
+}));
+
+vi.mock("@/lib/env/public", () => ({
+  getPublicEnv: () => ({
+    NEXT_PUBLIC_APP_URL: "https://boards.example",
+  }),
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireUser.mockResolvedValue({ id: "owner-id", email: null });
   mocks.getBoardForEditor.mockResolvedValue({
     id: "30000000-0000-4000-8000-000000000003",
+    slug: "summer-night-market",
     title: "여름 야시장",
     summary: "행사 요약",
     contentMarkdown: "# 안내",
@@ -48,6 +59,10 @@ beforeEach(() => {
     },
     revision: 2,
     updatedAt: "2026-07-28T10:00:00.000Z",
+    status: "draft",
+    visibility: "private",
+    allowIndexing: false,
+    publishedAt: null,
   });
   mocks.notFound.mockImplementation(() => {
     throw new Error("NEXT_NOT_FOUND");
@@ -68,6 +83,12 @@ it("protects and renders the owner editor", async () => {
   );
   expect(screen.getByRole("heading", { name: "안내판 편집" })).toBeVisible();
   expect(screen.getByLabelText("제목")).toHaveValue("여름 야시장");
+  expect(screen.getByRole("heading", { name: "게시 설정" })).toBeVisible();
+  expect(
+    screen.getByRole("link", {
+      name: "https://boards.example/b/summer-night-market",
+    }),
+  ).toBeVisible();
 });
 
 it("uses the same not-found response for missing or foreign boards", async () => {
