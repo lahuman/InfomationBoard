@@ -7,6 +7,16 @@ export default defineConfig([
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   nextPlugin.configs["core-web-vitals"],
+  {
+    files: ["scripts/**/*.mjs"],
+    languageOptions: {
+      globals: {
+        Buffer: "readonly",
+        console: "readonly",
+        process: "readonly",
+      },
+    },
+  },
   globalIgnores([
     "legacy/**",
     ".next/**",

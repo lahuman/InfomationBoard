@@ -9,6 +9,9 @@ permissions:
 
 env:
   NEXT_PUBLIC_APP_URL: http://127.0.0.1:3000
+  NEXT_PUBLIC_SUPABASE_URL: https://project.supabase.co
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci_test
+  SUPABASE_SECRET_KEY: sb_secret_ci_test
 
 jobs:
   quality:
@@ -20,10 +23,7 @@ jobs:
           node-version: 24
           cache: npm
       - run: npm ci
-      - run: npm run lint
-      - run: npm run typecheck
-      - run: npm run test:run
-      - run: npm run build
+      - run: npm run verify
       - run: npm audit --audit-level=high
 
   e2e:

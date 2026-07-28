@@ -20,6 +20,9 @@ export default defineConfig({
     command: "npm run build && npm run start",
     env: {
       NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000",
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_ci_test",
+      SUPABASE_SECRET_KEY: "sb_secret_ci_test",
     },
     url: "http://127.0.0.1:3000",
     reuseExistingServer: !process.env.CI,
