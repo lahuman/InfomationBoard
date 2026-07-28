@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { PublishBoardResult } from "../actions/publish-board";
+import { QrControls } from "../qr/qr-controls";
 import type { PublicationInput } from "../schema";
 
 type PublicationSettingsProps = {
@@ -167,6 +168,11 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
           {canonicalUrl}
         </a>
       </div>
+
+      <QrControls
+        canonicalUrl={canonicalUrl}
+        enabled={currentMode === "public" || currentMode === "password"}
+      />
 
       <fieldset className="publication-options" disabled={state === "saving"}>
         <legend>공개 방식</legend>

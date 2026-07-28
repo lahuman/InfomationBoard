@@ -45,6 +45,8 @@ describe("PublicationSettings", () => {
       "href",
       "https://boards.example/b/summer-night-market",
     );
+    expect(screen.getByRole("heading", { name: "QR 공유" })).toBeVisible();
+    expect(screen.getByRole("img", { name: "안내판 QR 미리보기" })).toBeVisible();
 
     fireEvent.click(
       screen.getByRole("checkbox", { name: "검색엔진 노출 허용" }),

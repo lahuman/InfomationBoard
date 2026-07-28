@@ -1027,6 +1027,95 @@ a {
   opacity: 0.55;
 }
 
+.qr-controls {
+  display: grid;
+  gap: 1rem;
+  padding: clamp(1.25rem, 3vw, 2rem);
+  border: 1px solid var(--foreground);
+  background: #fffdf7;
+}
+
+.qr-controls-heading {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 2rem;
+}
+
+.qr-controls-heading h3 {
+  margin: 0.7rem 0 0;
+  font-size: clamp(1.8rem, 4vw, 3rem);
+  letter-spacing: -0.05em;
+}
+
+.qr-controls-heading > p,
+.qr-unavailable {
+  max-width: 30rem;
+  margin: 0;
+  line-height: 1.5;
+  word-break: keep-all;
+}
+
+.qr-controls-content {
+  display: grid;
+  grid-template-columns: minmax(12rem, 16rem) minmax(0, 1fr);
+  gap: clamp(1rem, 4vw, 2rem);
+  align-items: center;
+}
+
+.qr-preview-frame {
+  display: grid;
+  aspect-ratio: 1;
+  place-items: center;
+  padding: 0.75rem;
+  border: 1px solid var(--foreground);
+  background: #fff;
+}
+
+.qr-preview-frame img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.qr-control-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  align-items: center;
+}
+
+.qr-control-actions button,
+.qr-control-actions a {
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--foreground);
+  background: transparent;
+  color: var(--foreground);
+  font: inherit;
+  font-weight: 800;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.qr-control-actions button:focus-visible,
+.qr-control-actions a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.qr-control-actions p {
+  width: 100%;
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+  font-weight: 800;
+}
+
+.qr-unavailable {
+  padding: 1rem;
+  border-left: 0.3rem solid var(--foreground);
+  background: #eee7da;
+}
+
 .publication-password input:focus-visible,
 .publication-options input:focus-visible,
 .publication-toggle input:focus-visible,
@@ -1549,6 +1638,7 @@ a {
   .edit-board-heading,
   .editor-notice,
   .publication-heading,
+  .qr-controls-heading,
   .editor-danger-zone {
     align-items: flex-start;
     flex-direction: column;
@@ -1587,6 +1677,14 @@ a {
 
   .publication-url {
     grid-template-columns: 1fr;
+  }
+
+  .qr-controls-content {
+    grid-template-columns: 1fr;
+  }
+
+  .qr-preview-frame {
+    width: min(100%, 16rem);
   }
 
   .password-challenge-panel {
