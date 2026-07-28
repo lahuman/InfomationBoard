@@ -65,7 +65,7 @@ npx supabase db query --linked \
 npx supabase db query --linked "drop extension pgtap"
 ```
 
-Both test runs must finish at assertion 12. The second run proves fixture
+Both test runs must finish at assertion 15. The second run proves fixture
 rollback, and the final command prevents test-only schema drift.
 
 Never run `supabase db reset --linked`. Remote fixture tests must run inside a
@@ -111,6 +111,30 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
   npm run test:e2e -- tests/e2e/board-owner.spec.ts
 ```
 
+## Publishing, protected access, and QR
+
+Owners can publish a board publicly, protect it with a visitor password, or
+withdraw it to a private draft without changing its slug. Public reads use an
+anonymous, presentation-only Supabase client. Password content is fetched only
+through service-role RPCs, with Argon2id verification on the Node.js server.
+
+Password failures are keyed by a domain-separated HMAC of a coarse visitor
+network key; raw IP addresses are never stored. Five failures within 15 minutes
+create a 15-minute lock. Successful access uses a versioned, board-scoped,
+HttpOnly, SameSite=Lax cookie for 12 hours. Replacing or removing the board
+password invalidates existing access cookies.
+
+PNG and SVG QR files are generated on demand and contain only
+`NEXT_PUBLIC_APP_URL + /b/[slug]`. They never contain a password or access
+token, and no QR artifact is persisted.
+
+Run the authenticated Phase 4 browser scenarios with the same storage state:
+
+```bash
+E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
+  npm run test:e2e -- tests/e2e/publishing.spec.ts
+```
+
 ## Verification
 
 - `npm run verify`
@@ -119,5 +143,19 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
 - `npx supabase migration list --linked`
 - `npx supabase db lint --linked --level error --fail-on error`
 - `npx supabase test db --linked supabase/tests/phase2_rls.test.sql`
+
+On the Docker-free workstation, run all transactional database suites twice:
+
+```bash
+npx supabase db query --linked --file supabase/tests/phase2_rls.test.sql
+npx supabase db query --linked --file supabase/tests/phase2_rls.test.sql
+npx supabase db query --linked --file supabase/tests/phase4_publishing.test.sql
+npx supabase db query --linked --file supabase/tests/phase4_publishing.test.sql
+npx supabase db query --linked --file supabase/tests/phase4_password_access.test.sql
+npx supabase db query --linked --file supabase/tests/phase4_password_access.test.sql
+```
+
+Expected final assertions are 15, 20, and 18 respectively. The repeated runs
+prove every fixture transaction rolls back cleanly.
 
 The archived 2019 prototype lives under `legacy/` and must not be deployed.
