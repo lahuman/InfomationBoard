@@ -76,10 +76,12 @@ admitted.
 
 In Supabase Dashboard, configure:
 
-- Site URL: `http://localhost:3000`
+- Site URL: the production application origin
 - Redirect allowlist:
   - `http://localhost:3000/auth/callback`
   - `http://localhost:3000/auth/confirm`
+  - `<production-origin>/auth/callback`
+  - `<production-origin>/auth/confirm`
 - Magic Link email template target:
   `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`
 
@@ -87,6 +89,21 @@ Enable the Google provider in Supabase Authentication, save its Google Client
 ID and Client Secret there, then register the hosted Supabase callback URL shown
 by that provider screen in Google Auth Platform. Provider secrets must never be
 copied into this repository.
+
+## Production deployment
+
+The production service is deployed on Vercel at
+<https://informationboard-six.vercel.app>. Configure these variables for the
+Production environment in Vercel before deploying:
+
+- `NEXT_PUBLIC_APP_URL`
+- `NEXT_PUBLIC_SUPABASE_URL`
+- `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY`
+- `SUPABASE_SECRET_KEY` as a sensitive value
+
+Deploy the linked project with `npx vercel --prod`. The `.vercelignore` file
+keeps all local environment files and Playwright artifacts out of deployment
+uploads.
 
 After configuration, manually verify both approved flows:
 

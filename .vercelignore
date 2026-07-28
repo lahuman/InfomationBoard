@@ -1,0 +1,6 @@
+.env
+.env.*
+!.env.example
+.playwright/
+playwright-report/
+test-results/
