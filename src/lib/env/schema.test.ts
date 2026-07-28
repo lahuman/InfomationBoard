@@ -1,22 +1,44 @@
 import { describe, expect, it } from "vitest";
-import { parseAppEnv } from "./schema";
+import { parsePublicEnv, parseServerEnv } from "./schema";
 
-describe("parseAppEnv", () => {
-  it("accepts and normalizes an http application URL", () => {
-    expect(
-      parseAppEnv({ NEXT_PUBLIC_APP_URL: "http://localhost:3000/" }),
-    ).toEqual({ NEXT_PUBLIC_APP_URL: "http://localhost:3000" });
+const publicSource = {
+  NEXT_PUBLIC_APP_URL: "http://localhost:3000/",
+  NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co/",
+  NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+};
+
+describe("parsePublicEnv", () => {
+  it("normalizes the configured origins", () => {
+    expect(parsePublicEnv(publicSource)).toEqual({
+      NEXT_PUBLIC_APP_URL: "http://localhost:3000",
+      NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "sb_publishable_test",
+    });
   });
 
-  it("rejects a missing application URL", () => {
-    expect(() => parseAppEnv({})).toThrow(
-      "NEXT_PUBLIC_APP_URL: Invalid input: expected string",
-    );
-  });
-
-  it("rejects non-http protocols", () => {
+  it("rejects legacy or missing publishable keys", () => {
     expect(() =>
-      parseAppEnv({ NEXT_PUBLIC_APP_URL: "javascript:alert(1)" }),
-    ).toThrow("NEXT_PUBLIC_APP_URL: URL must use http or https");
+      parsePublicEnv({
+        ...publicSource,
+        NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: "legacy-anon-key",
+      }),
+    ).toThrow("NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY");
+  });
+});
+
+describe("parseServerEnv", () => {
+  it("requires a current secret key", () => {
+    expect(() => parseServerEnv(publicSource)).toThrow("SUPABASE_SECRET_KEY");
+  });
+
+  it("accepts the server-only key without returning it from public parsing", () => {
+    const server = parseServerEnv({
+      ...publicSource,
+      SUPABASE_SECRET_KEY: "sb_secret_test",
+    });
+    expect(server.SUPABASE_SECRET_KEY).toBe("sb_secret_test");
+    expect(parsePublicEnv(publicSource)).not.toHaveProperty(
+      "SUPABASE_SECRET_KEY",
+    );
   });
 });

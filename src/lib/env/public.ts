@@ -1,13 +1,10 @@
-import "server-only";
-import { cache } from "react";
-import { parseServerEnv } from "./schema";
+import { parsePublicEnv } from "./schema";
 
-export const getServerEnv = cache(() =>
-  parseServerEnv({
+export function getPublicEnv() {
+  return parsePublicEnv({
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL,
     NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
     NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY:
       process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY,
-    SUPABASE_SECRET_KEY: process.env.SUPABASE_SECRET_KEY,
-  }),
-);
+  });
+}
