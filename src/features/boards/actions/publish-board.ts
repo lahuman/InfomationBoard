@@ -13,6 +13,11 @@ import {
 const SAVE_ERROR_MESSAGE =
   "게시 설정을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 const CONTENT_ERROR_MESSAGE = "게시하려면 제목과 본문을 입력해 주세요.";
+const boardSlugSchema = z
+  .string()
+  .min(1)
+  .max(120)
+  .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/);
 
 const currentPublicationSchema = z
   .object({
@@ -41,6 +46,30 @@ export type PublishBoardResult =
       message: string;
       fieldErrors?: Record<string, string[] | undefined>;
     };
+
+async function revalidateBoardPaths(
+  supabase: Awaited<ReturnType<typeof createServerSupabaseClient>>,
+  boardId: string,
+  ownerId: string,
+  editorPath: string,
+) {
+  revalidatePath(editorPath);
+  revalidatePath("/dashboard");
+
+  try {
+    const { data, error } = await supabase
+      .from("boards")
+      .select("slug")
+      .eq("id", boardId)
+      .eq("owner_id", ownerId)
+      .maybeSingle();
+    const slug = boardSlugSchema.safeParse(data?.slug);
+
+    if (!error && slug.success) revalidatePath(`/b/${slug.data}`);
+  } catch {
+    // The mutation is already durable; a later request can refresh this path.
+  }
+}
 
 export async function publishBoard(
   input: PublicationInput,
@@ -122,8 +151,12 @@ export async function publishBoard(
   }
 
   if (mutationResult.data) {
-    revalidatePath(editorPath);
-    revalidatePath("/dashboard");
+    await revalidateBoardPaths(
+      supabase,
+      parsed.data.id,
+      user.id,
+      editorPath,
+    );
     return {
       status: "saved",
       revision: mutationResult.data.revision,

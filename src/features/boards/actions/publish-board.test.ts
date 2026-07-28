@@ -73,6 +73,10 @@ beforeEach(() => {
   mocks.currentEqOwner.mockReturnValue({
     maybeSingle: mocks.currentMaybeSingle,
   });
+  mocks.currentMaybeSingle.mockResolvedValue({
+    data: { slug: "summer-night-market" },
+    error: null,
+  });
   mocks.hash.mockResolvedValue("$argon2id$owner-password-hash");
   mocks.rpc.mockResolvedValue({
     data: [
@@ -109,6 +113,9 @@ describe("publishBoard", () => {
       "10000000-0000-4000-8000-000000000001",
     );
     expect(mocks.eqRevision).toHaveBeenCalledWith("revision", 2);
+    expect(mocks.revalidatePath).toHaveBeenCalledWith(
+      "/b/summer-night-market",
+    );
   });
 
   it("returns a published board to a private draft with indexing disabled", async () => {
