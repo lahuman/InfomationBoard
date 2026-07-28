@@ -69,7 +69,11 @@ Exit gate:
 
 ## Phase 4: Publishing, password access, and QR
 
-Create a separate implementation plan after Phase 3 passes.
+Detailed design:
+`docs/superpowers/specs/2026-07-28-informationboard-publishing-access-qr-design.md`
+
+Detailed plan:
+`docs/superpowers/plans/2026-07-28-informationboard-publishing-access-qr.md`
 
 Deliver:
 
