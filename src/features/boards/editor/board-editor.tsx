@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import type { DeleteBoardResult } from "../actions/delete-board";
 import { BoardMarkdown } from "../markdown/board-markdown";
 import type { UpdateBoardInput } from "../schema";
 import type { UpdateBoardResult } from "../actions/update-board";
@@ -33,6 +35,7 @@ const saveLabels: Record<SaveState, string> = {
 
 type BoardEditorProps = {
   board: EditorBoard;
+  deleteBoardAction: (input: { id: string }) => Promise<DeleteBoardResult>;
   updateBoardAction: (
     input: UpdateBoardInput,
   ) => Promise<UpdateBoardResult>;
@@ -49,14 +52,21 @@ function toDraft(board: EditorBoard): EditorDraft {
 
 export function BoardEditor({
   board,
+  deleteBoardAction,
   updateBoardAction,
 }: BoardEditorProps) {
+  const router = useRouter();
   const [draft, setDraft] = useState<EditorDraft>(() => toDraft(board));
   const [revision, setRevision] = useState(board.revision);
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
   const [conflict, setConflict] = useState<EditorBoard | null>(null);
   const [recovery, setRecovery] = useState<RecoveryCopy | null>(null);
+  const [showDeleteConfirmation, setShowDeleteConfirmation] = useState(false);
+  const [deleteState, setDeleteState] = useState<
+    "idle" | "deleting" | "error"
+  >("idle");
+  const [deleteError, setDeleteError] = useState("");
 
   const draftRef = useRef(draft);
   const revisionRef = useRef(revision);
@@ -211,6 +221,32 @@ export function BoardEditor({
   function discardRecovery() {
     clearRecoveryCopy(board.id);
     setRecovery(null);
+  }
+
+  async function confirmDelete() {
+    if (deleteState === "deleting") return;
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+    setDeleteState("deleting");
+    setDeleteError("");
+
+    try {
+      const result = await deleteBoardAction({ id: board.id });
+      if (result.status === "deleted") {
+        clearRecoveryCopy(board.id);
+        router.replace("/dashboard");
+        router.refresh();
+        return;
+      }
+
+      setDeleteError(result.message);
+    } catch {
+      setDeleteError(
+        "안내판을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      );
+    }
+
+    setDeleteState("error");
   }
 
   return (
@@ -382,7 +418,66 @@ export function BoardEditor({
           <BoardMarkdown markdown={draft.contentMarkdown} />
         </section>
       </div>
+
+      <section className="editor-danger-zone" aria-labelledby="danger-title">
+        <div>
+          <p className="section-kicker">DANGER ZONE</p>
+          <h2 id="danger-title">안내판 삭제</h2>
+          <p>삭제한 안내판은 복구할 수 없습니다.</p>
+        </div>
+        <button
+          className="danger-button"
+          onClick={() => {
+            setDeleteError("");
+            setDeleteState("idle");
+            setShowDeleteConfirmation(true);
+          }}
+          type="button"
+        >
+          안내판 삭제
+        </button>
+      </section>
+
+      {showDeleteConfirmation ? (
+        <div
+          aria-labelledby="delete-confirmation-title"
+          aria-modal="true"
+          className="delete-dialog-backdrop"
+          role="dialog"
+        >
+          <div className="delete-dialog">
+            <p className="section-kicker">DELETE BOARD</p>
+            <h2 id="delete-confirmation-title">
+              ‘{draft.title || "제목 없는 안내판"}’을 삭제할까요?
+            </h2>
+            <p>
+              저장된 내용이 모두 삭제되며 이 작업은 되돌릴 수 없습니다.
+            </p>
+            {deleteError ? (
+              <p className="delete-error" role="alert">
+                {deleteError}
+              </p>
+            ) : null}
+            <div className="delete-dialog-actions">
+              <button
+                disabled={deleteState === "deleting"}
+                onClick={() => setShowDeleteConfirmation(false)}
+                type="button"
+              >
+                취소
+              </button>
+              <button
+                className="danger-button"
+                disabled={deleteState === "deleting"}
+                onClick={() => void confirmDelete()}
+                type="button"
+              >
+                {deleteState === "deleting" ? "삭제 중…" : "영구 삭제"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
-

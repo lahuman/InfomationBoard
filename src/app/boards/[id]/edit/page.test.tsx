@@ -10,6 +10,10 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock("next/navigation", () => ({
   notFound: mocks.notFound,
+  useRouter: () => ({
+    replace: vi.fn(),
+    refresh: vi.fn(),
+  }),
 }));
 
 vi.mock("@/features/auth/require-user", () => ({
@@ -22,6 +26,10 @@ vi.mock("@/features/boards/editor/queries", () => ({
 
 vi.mock("@/features/boards/actions/update-board", () => ({
   updateBoard: vi.fn(),
+}));
+
+vi.mock("@/features/boards/actions/delete-board", () => ({
+  deleteBoard: vi.fn(),
 }));
 
 beforeEach(() => {
@@ -73,4 +81,3 @@ it("uses the same not-found response for missing or foreign boards", async () =>
     }),
   ).rejects.toThrow("NEXT_NOT_FOUND");
 });
-

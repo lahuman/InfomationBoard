@@ -96,6 +96,21 @@ After configuration, manually verify both approved flows:
 3. Complete Google consent and confirm that it opens `/dashboard`.
 4. Confirm that each new Auth user has a matching `public.profiles` row.
 
+## Board owner workflow
+
+Authenticated owners can create a private board from the store, event, or
+meeting template, edit it with autosave and safe Markdown preview, recover a
+newer local draft, and permanently delete it after explicit confirmation.
+Supabase is the source of truth; per-board JSON import and export are not part
+of the product.
+
+The authenticated owner E2E scenario accepts a Playwright storage-state file:
+
+```bash
+E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
+  npm run test:e2e -- tests/e2e/board-owner.spec.ts
+```
+
 ## Verification
 
 - `npm run verify`

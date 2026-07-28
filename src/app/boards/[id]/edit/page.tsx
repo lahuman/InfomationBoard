@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
 import { requireUser } from "@/features/auth/require-user";
+import { deleteBoard } from "@/features/boards/actions/delete-board";
 import { updateBoard } from "@/features/boards/actions/update-board";
 import { BoardEditor } from "@/features/boards/editor/board-editor";
 import { getBoardForEditor } from "@/features/boards/editor/queries";
@@ -36,8 +37,11 @@ export default async function EditBoardPage({
         <p>입력한 내용은 자동으로 저장됩니다.</p>
       </section>
 
-      <BoardEditor board={board} updateBoardAction={updateBoard} />
+      <BoardEditor
+        board={board}
+        deleteBoardAction={deleteBoard}
+        updateBoardAction={updateBoard}
+      />
     </main>
   );
 }
-
