@@ -1338,6 +1338,109 @@ a {
   margin: 0;
 }
 
+.password-challenge-page {
+  position: relative;
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  overflow: hidden;
+  padding: clamp(4rem, 8vw, 7rem) 1.25rem;
+}
+
+.password-challenge-page::before {
+  position: absolute;
+  top: -10rem;
+  right: -8rem;
+  width: clamp(22rem, 54vw, 46rem);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  content: "";
+}
+
+.password-challenge-panel {
+  position: relative;
+  width: min(100%, 44rem);
+  padding: clamp(1.5rem, 5vw, 3.5rem);
+  border: 1px solid var(--foreground);
+  background: var(--background);
+  box-shadow: 0.8rem 0.8rem 0 var(--foreground);
+}
+
+.password-challenge-panel h1 {
+  max-width: 11ch;
+  margin: 2rem 0 1rem;
+  font-size: clamp(2.8rem, 8vw, 5.5rem);
+  line-height: 0.9;
+  letter-spacing: -0.07em;
+  word-break: keep-all;
+}
+
+.password-challenge-intro {
+  max-width: 30rem;
+  line-height: 1.6;
+  word-break: keep-all;
+}
+
+.password-challenge-panel form {
+  margin-top: 2rem;
+}
+
+.password-challenge-panel label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 800;
+}
+
+.password-challenge-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.password-challenge-row input,
+.password-challenge-row button {
+  min-height: 3.2rem;
+  border: 1px solid var(--foreground);
+  border-radius: 0;
+  font: inherit;
+}
+
+.password-challenge-row input {
+  min-width: 0;
+  padding: 0.85rem 1rem;
+  background: #fffdf7;
+  color: var(--foreground);
+}
+
+.password-challenge-row button {
+  padding: 0.8rem 1rem;
+  background: var(--foreground);
+  color: var(--background);
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.password-challenge-row button:disabled {
+  cursor: wait;
+  opacity: 0.6;
+}
+
+.password-challenge-row input:focus-visible,
+.password-challenge-row button:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.password-challenge-message {
+  margin: 1rem 0 0;
+  padding: 0.8rem;
+  border-left: 0.3rem solid var(--foreground);
+  background: #ffe0d7;
+  font-size: 0.9rem;
+  font-weight: 800;
+}
+
 .use-cases {
   padding: clamp(3rem, 8vw, 7rem) clamp(1.25rem, 4vw, 4rem);
 }
@@ -1483,6 +1586,14 @@ a {
   }
 
   .publication-url {
+    grid-template-columns: 1fr;
+  }
+
+  .password-challenge-panel {
+    box-shadow: 0.45rem 0.45rem 0 var(--foreground);
+  }
+
+  .password-challenge-row {
     grid-template-columns: 1fr;
   }
 }

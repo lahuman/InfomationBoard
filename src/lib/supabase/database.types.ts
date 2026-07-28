@@ -177,6 +177,32 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      clear_password_failures_for_server: {
+        Args: { p_anonymous_key_hash: string; p_board_id: string }
+        Returns: undefined
+      }
+      get_password_board_for_server: {
+        Args: { p_slug: string }
+        Returns: {
+          board_id: string
+          content_markdown: string
+          password_hash: string
+          published_at: string
+          secret_version: string
+          slug: string
+          summary: string
+          template: string
+          theme: Json
+          title: string
+          updated_at: string
+        }[]
+      }
+      get_password_lock_for_server: {
+        Args: { p_anonymous_key_hash: string; p_board_id: string }
+        Returns: {
+          locked_until: string
+        }[]
+      }
       publish_board_with_password: {
         Args: {
           p_board_id: string
@@ -186,6 +212,13 @@ export type Database = {
         Returns: {
           revision: number
           updated_at: string
+        }[]
+      }
+      record_password_failure_for_server: {
+        Args: { p_anonymous_key_hash: string; p_board_id: string }
+        Returns: {
+          failed_count: number
+          locked_until: string
         }[]
       }
     }
