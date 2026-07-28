@@ -126,6 +126,47 @@ it("uses the publication revision for the next autosave", async () => {
   );
 });
 
+it("uses the autosave revision when publishing edited content", async () => {
+  const update = vi.fn(
+    async (): Promise<UpdateBoardResult> => ({
+      status: "saved",
+      revision: 3,
+      updatedAt: "2026-07-28T10:01:00.000Z",
+    }),
+  );
+  const publish = vi.fn(
+    async (): Promise<PublishBoardResult> => ({
+      status: "saved",
+      revision: 4,
+      updatedAt: "2026-07-28T10:02:00.000Z",
+    }),
+  );
+  render(
+    <BoardEditor
+      board={initialBoard}
+      canonicalUrl={publicationProps.canonicalUrl}
+      deleteBoardAction={vi.fn()}
+      publishBoardAction={publish}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "게시 전 수정" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+  fireEvent.click(screen.getByRole("radio", { name: /전체 공개/ }));
+  await act(async () => {
+    fireEvent.click(screen.getByRole("button", { name: "게시 설정 저장" }));
+  });
+
+  expect(publish).toHaveBeenCalledWith(
+    expect.objectContaining({ revision: 3, mode: "public" }),
+  );
+});
+
 it("preserves local input when the server reports a conflict", async () => {
   const update = vi.fn(
     async (): Promise<UpdateBoardResult> => ({

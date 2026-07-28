@@ -1,6 +1,11 @@
 import { expect, test } from "@playwright/test";
+import path from "node:path";
 
-const ownerStorageState = process.env.E2E_OWNER_STORAGE_STATE;
+const ownerStorageState =
+  process.env.E2E_OWNER_STORAGE_STATE ??
+  (process.env.E2E_LIVE_SUPABASE === "1"
+    ? path.join(process.cwd(), ".playwright/.auth/owner.json")
+    : undefined);
 
 async function createBoard(page: import("@playwright/test").Page, title: string) {
   await page.goto("/boards/new");
@@ -92,7 +97,9 @@ test.describe("publishing, protected access, and QR", () => {
     expect(canonicalUrl).toBeTruthy();
 
     await page.getByRole("radio", { name: /^비밀번호 보호/ }).check();
-    await page.getByLabel("방문 비밀번호").fill("first-password");
+    await page
+      .getByRole("textbox", { name: /^방문 비밀번호/ })
+      .fill("first-password");
     await page.getByRole("button", { name: "게시 설정 저장" }).click();
     await expect(page.getByText("게시 설정을 저장했습니다.")).toBeVisible();
 
@@ -103,7 +110,9 @@ test.describe("publishing, protected access, and QR", () => {
     await visitor.getByRole("button", { name: "안내판 열기" }).click();
     await expect(visitor.getByRole("heading", { name: title })).toBeVisible();
 
-    await page.getByLabel("방문 비밀번호").fill("second-password");
+    await page
+      .getByRole("textbox", { name: /^방문 비밀번호/ })
+      .fill("second-password");
     await page.getByRole("button", { name: "게시 설정 저장" }).click();
     await expect(page.getByText("게시 설정을 저장했습니다.")).toBeVisible();
     await visitor.reload();
@@ -111,10 +120,21 @@ test.describe("publishing, protected access, and QR", () => {
 
     for (let attempt = 1; attempt <= 5; attempt += 1) {
       await visitor.getByLabel("안내판 비밀번호").fill("wrong-password");
-      await visitor.getByRole("button", { name: "안내판 열기" }).click();
-      await expect(visitor.getByRole("alert")).toBeVisible();
+      const submit = visitor.getByRole("button", { name: "안내판 열기" });
+      const verificationResponse = visitor.waitForResponse(
+        (response) =>
+          response.request().method() === "POST" &&
+          new URL(response.url()).pathname === new URL(canonicalUrl!).pathname,
+      );
+      await submit.click();
+      await verificationResponse;
+      await expect(visitor.locator(".password-challenge-message")).toHaveText(
+        attempt === 5
+          ? "잠시 후 다시 시도해 주세요."
+          : "비밀번호를 확인해 주세요.",
+      );
     }
-    await expect(visitor.getByRole("alert")).toHaveText(
+    await expect(visitor.locator(".password-challenge-message")).toHaveText(
       "잠시 후 다시 시도해 주세요.",
     );
 

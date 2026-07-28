@@ -128,7 +128,20 @@ PNG and SVG QR files are generated on demand and contain only
 `NEXT_PUBLIC_APP_URL + /b/[slug]`. They never contain a password or access
 token, and no QR artifact is persisted.
 
-Run the authenticated Phase 4 browser scenarios with the same storage state:
+Run the authenticated Phase 4 browser scenarios against the linked hosted
+Supabase project with an automatically created temporary owner:
+
+```bash
+E2E_LIVE_SUPABASE=1 \
+  npm run test:e2e -- tests/e2e/publishing.spec.ts
+```
+
+The global setup creates a unique magic-link owner and writes its browser
+session under the gitignored `.playwright/` directory. Global teardown deletes
+the Auth user, its cascaded board data, and the local session artifacts even
+when a test fails.
+
+An existing owner storage-state file can still be supplied explicitly:
 
 ```bash
 E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \

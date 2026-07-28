@@ -432,6 +432,7 @@ export function BoardEditor({
       <PublicationSettings
         board={board}
         canonicalUrl={canonicalUrl}
+        revision={revision}
         onRevisionChange={(nextRevision) => {
           revisionRef.current = nextRevision;
           setRevision(nextRevision);

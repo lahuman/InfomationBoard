@@ -16,6 +16,7 @@ type PublicationSettingsProps = {
     publishedAt: string | null;
   };
   canonicalUrl: string;
+  revision: number;
   onRevisionChange: (revision: number) => void;
   publishBoardAction: (
     input: PublicationInput,
@@ -26,6 +27,7 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
   const {
     board,
     canonicalUrl,
+    revision,
     onRevisionChange,
     publishBoardAction,
   } = _props;
@@ -39,7 +41,6 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
   const [mode, setMode] = useState<PublicationInput["mode"]>(initialMode);
   const [currentMode, setCurrentMode] =
     useState<PublicationInput["mode"]>(initialMode);
-  const [currentRevision, setCurrentRevision] = useState(board.revision);
   const [allowIndexing, setAllowIndexing] = useState(board.allowIndexing);
   const [currentAllowIndexing, setCurrentAllowIndexing] = useState(
     board.allowIndexing,
@@ -72,20 +73,20 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
       mode === "public"
         ? {
             id: board.id,
-            revision: currentRevision,
+            revision,
             mode,
             allowIndexing,
           }
         : mode === "password"
           ? {
               id: board.id,
-              revision: currentRevision,
+              revision,
               mode,
               password,
             }
           : {
               id: board.id,
-              revision: currentRevision,
+              revision,
               mode,
             };
 
@@ -99,7 +100,6 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
     }
 
     if (result.status === "saved") {
-      setCurrentRevision(result.revision);
       setCurrentMode(mode);
       setCurrentAllowIndexing(mode === "public" ? allowIndexing : false);
       setShowWithdrawConfirmation(false);
@@ -118,7 +118,6 @@ export function PublicationSettings(_props: PublicationSettingsProps) {
           : result.current.visibility === "password"
             ? "password"
             : "public";
-      setCurrentRevision(result.current.revision);
       setCurrentMode(conflictMode);
       setMode(conflictMode);
       setAllowIndexing(result.current.allowIndexing);

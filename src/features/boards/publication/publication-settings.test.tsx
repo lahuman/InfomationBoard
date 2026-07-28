@@ -28,6 +28,7 @@ describe("PublicationSettings", () => {
       <PublicationSettings
         board={publicBoard}
         canonicalUrl="https://boards.example/b/summer-night-market"
+        revision={publicBoard.revision}
         onRevisionChange={vi.fn()}
         publishBoardAction={vi.fn()}
       />,
@@ -73,6 +74,7 @@ describe("PublicationSettings", () => {
           publishedAt: null,
         }}
         canonicalUrl="https://boards.example/b/summer-night-market"
+        revision={publicBoard.revision}
         onRevisionChange={onRevisionChange}
         publishBoardAction={publish}
       />,
@@ -112,6 +114,7 @@ describe("PublicationSettings", () => {
       <PublicationSettings
         board={publicBoard}
         canonicalUrl="https://boards.example/b/summer-night-market"
+        revision={publicBoard.revision}
         onRevisionChange={vi.fn()}
         publishBoardAction={publish}
       />,
