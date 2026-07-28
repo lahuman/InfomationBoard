@@ -8,9 +8,13 @@ export function Hero() {
         <span>무료 베타</span> · INFORMATION FOR EVERYONE
       </p>
       <h1 id="hero-title">
-        한 번 만들고,
-        <br />
-        QR로 바로 알리세요.
+        <span className="poster-title-line">
+          <span className="poster-title-chunk">한 번 만들고,</span>
+        </span>
+        <span className="poster-title-line">
+          <span className="poster-title-chunk">QR로 바로</span>{" "}
+          <span className="poster-title-chunk">알리세요.</span>
+        </span>
       </h1>
       <p className="poster-summary">
         매장, 행사, 모임 안내를 보기 좋게 만들고 링크와 QR로 공유하세요.

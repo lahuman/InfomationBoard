@@ -57,17 +57,26 @@ a {
 
 .poster-hero h1 {
   position: relative;
-  max-width: 12ch;
+  max-width: 16ch;
   margin: clamp(5rem, 12vw, 9rem) 0 1.5rem;
-  font-size: clamp(3.5rem, 11vw, 8.5rem);
+  font-size: clamp(3.2rem, 9.2vw, 7.3rem);
   line-height: 0.92;
   letter-spacing: -0.07em;
+}
+
+.poster-title-line {
+  display: block;
+}
+
+.poster-title-chunk {
+  white-space: nowrap;
 }
 
 .poster-summary {
   position: relative;
   max-width: 34rem;
   font-size: clamp(1rem, 2.2vw, 1.35rem);
+  word-break: keep-all;
 }
 
 .poster-actions {
@@ -100,6 +109,7 @@ a {
   font-size: clamp(2.25rem, 6vw, 5rem);
   line-height: 1;
   letter-spacing: -0.05em;
+  word-break: keep-all;
 }
 
 .use-case-grid {
@@ -120,6 +130,7 @@ a {
 
 .use-case p {
   max-width: 20rem;
+  word-break: keep-all;
 }
 
 @media (max-width: 42rem) {

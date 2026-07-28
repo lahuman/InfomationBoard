@@ -42,7 +42,7 @@
 - `src/lib/env/server.ts`: cached server environment accessor.
 - `src/lib/legacy/schema.ts`: pure legacy JSON schema for later import work.
 - `src/lib/security/policy.ts`: nonce-aware CSP and immutable static headers.
-- `proxy.ts`: per-request CSP nonce boundary for Next.js-generated scripts.
+- `src/proxy.ts`: per-request CSP nonce boundary for Next.js-generated scripts.
 
 ### Configuration and verification
 
@@ -317,6 +317,7 @@ Write `next.config.ts`:
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   reactStrictMode: true,
   turbopack: {
@@ -369,6 +370,7 @@ export default defineConfig({
   },
   test: {
     environment: "jsdom",
+    include: ["src/**/*.{test,spec}.{ts,tsx}"],
     setupFiles: ["./vitest.setup.ts"],
   },
 });
@@ -759,7 +761,7 @@ git commit -m "test: characterize legacy information format"
 **Files:**
 - Create: `src/lib/security/policy.ts`
 - Create: `src/lib/security/policy.test.ts`
-- Create: `proxy.ts`
+- Create: `src/proxy.ts`
 - Modify: `next.config.ts`
 
 **Interfaces:**
@@ -847,7 +849,7 @@ export const STATIC_SECURITY_HEADERS = Object.freeze([
 ]);
 ```
 
-Create `proxy.ts`:
+Create `src/proxy.ts`:
 
 ```ts
 import { randomUUID } from "node:crypto";
@@ -891,6 +893,7 @@ import type { NextConfig } from "next";
 import { STATIC_SECURITY_HEADERS } from "./src/lib/security/policy";
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: ["127.0.0.1"],
   poweredByHeader: false,
   reactStrictMode: true,
   turbopack: {
@@ -919,7 +922,7 @@ configuration without CSP warnings.
 - [ ] **Step 5: Commit security headers**
 
 ```bash
-git add next.config.ts proxy.ts src/lib/security
+git add next.config.ts src/proxy.ts src/lib/security
 git commit -m "security: add baseline response headers"
 ```
 
@@ -1000,7 +1003,15 @@ export function Hero() {
     <section className="poster-hero" aria-labelledby="hero-title">
       <div className="poster-orb" aria-hidden="true" />
       <p className="poster-kicker">무료 베타 · INFORMATION FOR EVERYONE</p>
-      <h1 id="hero-title">한 번 만들고,<br />QR로 바로 알리세요.</h1>
+      <h1 id="hero-title">
+        <span className="poster-title-line">
+          <span className="poster-title-chunk">한 번 만들고,</span>
+        </span>
+        <span className="poster-title-line">
+          <span className="poster-title-chunk">QR로 바로</span>{" "}
+          <span className="poster-title-chunk">알리세요.</span>
+        </span>
+      </h1>
       <p className="poster-summary">
         매장, 행사, 모임 안내를 보기 좋게 만들고 링크와 QR로 공유하세요.
       </p>
@@ -1111,17 +1122,26 @@ a {
 
 .poster-hero h1 {
   position: relative;
-  max-width: 12ch;
+  max-width: 16ch;
   margin: clamp(5rem, 12vw, 9rem) 0 1.5rem;
-  font-size: clamp(3.5rem, 11vw, 8.5rem);
+  font-size: clamp(3.2rem, 9.2vw, 7.3rem);
   line-height: 0.92;
   letter-spacing: -0.07em;
+}
+
+.poster-title-line {
+  display: block;
+}
+
+.poster-title-chunk {
+  white-space: nowrap;
 }
 
 .poster-summary {
   position: relative;
   max-width: 34rem;
   font-size: clamp(1rem, 2.2vw, 1.35rem);
+  word-break: keep-all;
 }
 
 .poster-actions {
@@ -1154,6 +1174,7 @@ a {
   font-size: clamp(2.25rem, 6vw, 5rem);
   line-height: 1;
   letter-spacing: -0.05em;
+  word-break: keep-all;
 }
 
 .use-case-grid {
@@ -1174,6 +1195,7 @@ a {
 
 .use-case p {
   max-width: 20rem;
+  word-break: keep-all;
 }
 
 @media (max-width: 42rem) {
@@ -1249,7 +1271,7 @@ Create `tests/e2e/landing.spec.ts`:
 import { expect, test } from "@playwright/test";
 
 test("landing page introduces the beta and primary action", async ({ page }) => {
-  await page.goto("/");
+  const response = await page.goto("/");
 
   await expect(
     page.getByRole("heading", { level: 1, name: /한 번 만들고/ }),
@@ -1258,6 +1280,27 @@ test("landing page introduces the beta and primary action", async ({ page }) => 
     page.getByRole("link", { name: "무료로 안내판 만들기" }),
   ).toHaveAttribute("href", "/login");
   await expect(page.getByText("무료 베타")).toBeVisible();
+  expect(response?.headers()["content-security-policy"]).toContain("nonce-");
+  expect(response?.headers()["x-content-type-options"]).toBe("nosniff");
+});
+
+test("landing page remains usable without horizontal overflow on mobile", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+
+  await expect(
+    page.getByRole("heading", { level: 1, name: /한 번 만들고/ }),
+  ).toBeVisible();
+  await expect(
+    page.getByRole("link", { name: "무료로 안내판 만들기" }),
+  ).toBeVisible();
+
+  const hasHorizontalOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth > window.innerWidth,
+  );
+  expect(hasHorizontalOverflow).toBe(false);
 });
 ```
 
@@ -1290,7 +1333,7 @@ export default defineConfig({
     { name: "chromium", use: { ...devices["Desktop Chrome"] } },
   ],
   webServer: {
-    command: "npm run dev",
+    command: "npm run build && npm run start",
     env: { NEXT_PUBLIC_APP_URL: "http://127.0.0.1:3000" },
     url: "http://127.0.0.1:3000",
     reuseExistingServer: !process.env.CI,
@@ -1319,7 +1362,7 @@ npx playwright install chromium
 npm run test:e2e -- tests/e2e/landing.spec.ts
 ```
 
-Expected: one Chromium test passes.
+Expected: two Chromium tests pass.
 
 - [ ] **Step 5: Add CI quality gates**
 
