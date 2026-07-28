@@ -30,3 +30,14 @@ yarn-error.log*
 
 # Isolated implementation worktrees
 /.worktrees/
+
+# Next.js
+/.next/
+/out/
+/test-results/
+/playwright-report/
+
+# Local environment
+.env
+.env.*
+!.env.example
