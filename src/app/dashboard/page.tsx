@@ -1,9 +1,20 @@
 import Link from "next/link";
 import { signOut } from "@/features/auth/actions";
 import { requireUser } from "@/features/auth/require-user";
+import { BoardList } from "@/features/boards/board-list";
+import { getDashboardData } from "@/features/boards/queries";
+import { StorageMeter } from "@/features/boards/storage-meter";
 
 export default async function DashboardPage() {
   const user = await requireUser();
+  let dashboardData: Awaited<ReturnType<typeof getDashboardData>> | null =
+    null;
+
+  try {
+    dashboardData = await getDashboardData(user.id);
+  } catch {
+    // The dashboard renders a safe retry state without leaking DB details.
+  }
 
   return (
     <main className="dashboard-page">
@@ -22,27 +33,42 @@ export default async function DashboardPage() {
       <section className="dashboard-hero" aria-labelledby="dashboard-title">
         <p className="section-kicker">OWNER DASHBOARD · PRIVATE</p>
         <h1 id="dashboard-title">내 안내판</h1>
-        <p>
+        <p className="dashboard-hero-copy">
           내가 만든 안내판을 한곳에서 관리하고 게시 상태를 확인할 수
           있습니다.
         </p>
+        <Link className="dashboard-hero-action" href="/boards/new">
+          안내판 만들기
+        </Link>
       </section>
 
-      <section className="dashboard-empty" aria-labelledby="empty-title">
-        <div>
-          <p className="dashboard-index" aria-hidden="true">
-            00
-          </p>
-          <h2 id="empty-title">아직 만든 안내판이 없습니다.</h2>
+      {dashboardData ? (
+        <>
+          <StorageMeter storageBytes={dashboardData.storageBytes} />
+          <BoardList boards={dashboardData.boards} />
+        </>
+      ) : (
+        <section
+          className="dashboard-load-error"
+          aria-labelledby="dashboard-error-title"
+        >
+          <div>
+            <p className="dashboard-index" aria-hidden="true">
+              ERROR
+            </p>
+            <h2 id="dashboard-error-title">
+              안내판을 불러오지 못했습니다.
+            </h2>
           <p>
-            다음 단계에서 매장, 행사, 모임에 맞는 템플릿으로 첫 안내판을
-            만들 수 있습니다.
+              잠시 후 다시 시도해 주세요. 문제가 계속되면 새로고침해
+              주세요.
           </p>
-        </div>
-        <button className="dashboard-create-hint" type="button" disabled>
-          안내판 만들기 · 다음 단계
-        </button>
-      </section>
+          </div>
+          <Link className="dashboard-create-action" href="/dashboard">
+            다시 불러오기
+          </Link>
+        </section>
+      )}
     </main>
   );
 }
