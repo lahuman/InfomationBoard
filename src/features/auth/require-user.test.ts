@@ -73,4 +73,18 @@ describe("requireUser", () => {
       email: null,
     });
   });
+
+  it("preserves a safe requested path in the login redirect", async () => {
+    mocks.getClaims.mockResolvedValue({
+      data: { claims: null },
+      error: null,
+    });
+
+    await expect(requireUser("/boards/new")).rejects.toThrow(
+      "NEXT_REDIRECT",
+    );
+    expect(mocks.redirect).toHaveBeenCalledWith(
+      "/login?next=%2Fboards%2Fnew",
+    );
+  });
 });
