@@ -1,19 +1,24 @@
 import { randomUUID } from "node:crypto";
 import type { NextRequest } from "next/server";
-import { NextResponse } from "next/server";
+import { getPublicEnv } from "@/lib/env/public";
 import { buildContentSecurityPolicy } from "@/lib/security/policy";
+import { updateSupabaseSession } from "@/lib/supabase/proxy";
 
-export function proxy(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const nonce = Buffer.from(randomUUID()).toString("base64");
-  const contentSecurityPolicy = buildContentSecurityPolicy(nonce);
+  const supabaseOrigin = new URL(
+    getPublicEnv().NEXT_PUBLIC_SUPABASE_URL,
+  ).origin;
+  const contentSecurityPolicy = buildContentSecurityPolicy(
+    nonce,
+    supabaseOrigin,
+  );
   const requestHeaders = new Headers(request.headers);
 
   requestHeaders.set("x-nonce", nonce);
   requestHeaders.set("Content-Security-Policy", contentSecurityPolicy);
 
-  const response = NextResponse.next({
-    request: { headers: requestHeaders },
-  });
+  const response = await updateSupabaseSession(request, requestHeaders);
   response.headers.set("Content-Security-Policy", contentSecurityPolicy);
 
   return response;

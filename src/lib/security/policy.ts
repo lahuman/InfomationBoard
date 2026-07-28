@@ -1,4 +1,7 @@
-export function buildContentSecurityPolicy(nonce: string): string {
+export function buildContentSecurityPolicy(
+  nonce: string,
+  supabaseOrigin?: string,
+): string {
   return [
     "default-src 'self'",
     "base-uri 'self'",
@@ -9,7 +12,7 @@ export function buildContentSecurityPolicy(nonce: string): string {
     "style-src 'self'",
     "img-src 'self' data: blob:",
     "font-src 'self'",
-    "connect-src 'self'",
+    `connect-src 'self'${supabaseOrigin ? ` ${supabaseOrigin}` : ""}`,
     "media-src 'self'",
     "worker-src 'self' blob:",
     "upgrade-insecure-requests",

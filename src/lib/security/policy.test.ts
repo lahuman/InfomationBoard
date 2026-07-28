@@ -1,8 +1,24 @@
-import { describe, expect, it } from "vitest";
+import { NextRequest, NextResponse } from "next/server";
+import { describe, expect, it, vi } from "vitest";
 import {
   buildContentSecurityPolicy,
   STATIC_SECURITY_HEADERS,
 } from "./policy";
+import { proxy } from "@/proxy";
+
+const mocks = vi.hoisted(() => ({
+  updateSupabaseSession: vi.fn(async () => NextResponse.next()),
+}));
+
+vi.mock("@/lib/env/public", () => ({
+  getPublicEnv: () => ({
+    NEXT_PUBLIC_SUPABASE_URL: "https://project.supabase.co",
+  }),
+}));
+
+vi.mock("@/lib/supabase/proxy", () => ({
+  updateSupabaseSession: mocks.updateSupabaseSession,
+}));
 
 describe("security policy", () => {
   it("sets the required static browser security policies", () => {
@@ -24,5 +40,29 @@ describe("security policy", () => {
     expect(csp).toContain("script-src 'self' 'nonce-abc123' 'strict-dynamic'");
     expect(csp).not.toContain("'unsafe-inline'");
     expect(csp).toContain("object-src 'none'");
+  });
+
+  it("allows only the configured Supabase origin for connections", () => {
+    const csp = buildContentSecurityPolicy(
+      "abc123",
+      "https://project.supabase.co",
+    );
+
+    expect(csp).toContain(
+      "connect-src 'self' https://project.supabase.co",
+    );
+  });
+
+  it("retains the nonce policy after session refresh", async () => {
+    const response = await proxy(
+      new NextRequest("http://localhost:3000/dashboard"),
+    );
+    const csp = response.headers.get("content-security-policy");
+
+    expect(mocks.updateSupabaseSession).toHaveBeenCalledOnce();
+    expect(csp).toMatch(/script-src 'self' 'nonce-[^']+' 'strict-dynamic'/);
+    expect(csp).toContain(
+      "connect-src 'self' https://project.supabase.co",
+    );
   });
 });
