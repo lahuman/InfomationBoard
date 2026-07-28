@@ -263,24 +263,19 @@ file type.
 
 ## 9. Legacy Compatibility
 
-The product imports the legacy `information.json` shape containing `md` and
-`qr`. Import validates JSON size and structure, treats `md` as Markdown content,
-and treats `qr` as a candidate external URL. Import never executes embedded
-HTML.
-
-The product can export a board to a versioned JSON format. The new format
-contains board content and metadata but not attachment bytes, authentication
-data, password hashes, or signed URLs.
+The archived prototype and its `information.json` behavior remain documented as
+historical reference only. The customer-service application does not import or
+export per-board JSON because Supabase is the source of truth.
 
 The legacy Express upload server and its public upload directory are removed
-after the new import and attachment flows pass their tests.
+after the attachment flow and data-retention checks pass their tests.
 
 ## 10. Testing and Release Gates
 
 ### Automated tests
 
 - Unit tests cover schemas, URL rules, Markdown sanitization, visibility
-  decisions, storage limits, and legacy import.
+  decisions, and storage limits.
 - Component tests cover editor state, autosave status, attachments, publication
   settings, and error messages.
 - Integration tests run against a disposable Supabase-compatible local
@@ -325,8 +320,7 @@ The implementation plan will decompose the work into these ordered phases:
    CI quality gates, and environment validation.
 3. Supabase foundation: schema, migrations, RLS, Auth, Storage, and local/test
    configuration.
-4. Owner experience: dashboard, templates, split editor, autosave, and legacy
-   import/export.
+4. Owner experience: dashboard, templates, split editor, autosave, and deletion.
 5. Publishing: visibility, password access, public board, stable URL, and QR.
 6. Attachments: reservations, direct upload, quotas, download authorization,
    deletion, and cleanup.

@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace the unmaintained CRA/Express runtime with a tested Next.js foundation while preserving the legacy behavior needed for later data migration.
+**Goal:** Replace the unmaintained CRA/Express runtime with a tested Next.js foundation while preserving the legacy behavior as historical reference.
 
 **Architecture:** One root Next.js App Router application replaces the separate frontend and upload server. Legacy sources move under `legacy/` as read-only migration reference, while focused `src/app`, `src/components`, and `src/lib` units provide the new runtime, validation, and test boundaries.
 
@@ -12,7 +12,8 @@
 
 - Use Node.js 20.9.0 or newer; set the project engine floor to `>=20.9.0`.
 - Keep the first release free, non-commercial, and compatible with Vercel Hobby.
-- Preserve the legacy `information.json` fields `md` and `qr` for later import testing.
+- Preserve the legacy `information.json` behavior in the archived source and
+  documentation only.
 - Do not run or expose the legacy Express upload server.
 - Do not add Supabase credentials or authentication behavior in this phase.
 - Raw user-authored HTML, JavaScript, and CSS remain unsupported.
@@ -28,7 +29,6 @@
 - `legacy/client/src/**`: archived CRA source used only to understand migration behavior.
 - `legacy/client/public/**`: archived CRA public assets.
 - `legacy/server/**`: archived Express server; excluded from lint, build, and deployment.
-- `tests/fixtures/legacy-information.json`: valid legacy import fixture.
 - `docs/legacy-behavior.md`: explicit behavior inventory and retirement conditions.
 
 ### Runtime
@@ -40,7 +40,6 @@
 - `src/components/landing/use-cases.tsx`: store, event, and meeting use-case cards.
 - `src/lib/env/schema.ts`: pure environment schema and parser.
 - `src/lib/env/server.ts`: cached server environment accessor.
-- `src/lib/legacy/schema.ts`: pure legacy JSON schema for later import work.
 - `src/lib/security/policy.ts`: nonce-aware CSP and immutable static headers.
 - `src/proxy.ts`: per-request CSP nonce boundary for Next.js-generated scripts.
 
@@ -67,13 +66,12 @@
 - Move: `src/**` → `legacy/client/src/**`
 - Move: `public/**` → `legacy/client/public/**`
 - Move: `server/**` → `legacy/server/**`
-- Create: `tests/fixtures/legacy-information.json`
 - Create: `docs/legacy-behavior.md`
 - Modify: `.gitignore`
 
 **Interfaces:**
 - Consumes: the approved design and modern-foundation plan commits.
-- Produces: `tests/fixtures/legacy-information.json` with `{ "md": string, "qr": string }`; archived sources that no runtime script references.
+- Produces: archived sources that no runtime script references.
 
 - [ ] **Step 1: Record the current tracked-file baseline**
 
@@ -100,18 +98,7 @@ git mv server legacy/server
 
 Expected: Git records renames rather than delete-and-recreate changes.
 
-- [ ] **Step 3: Add a representative migration fixture**
-
-Create `tests/fixtures/legacy-information.json`:
-
-```json
-{
-  "md": "# 여름 마켓 안내\n\n행사 시간은 **12:00–18:00**입니다.",
-  "qr": "https://example.com/events/summer-market"
-}
-```
-
-- [ ] **Step 4: Document exactly what is being preserved and retired**
+- [ ] **Step 3: Document exactly what is being preserved and retired**
 
 Create `docs/legacy-behavior.md`:
 
@@ -130,12 +117,12 @@ The archived Express server is unsafe for public use because it stores the
 original filename in a public directory and parses uploaded JSON without schema
 or size validation. It must never be started or deployed.
 
-The archive may be removed only after automated tests cover legacy JSON import,
-safe Markdown preview, QR creation from a stable board URL, and the new
-attachment flow.
+The archive may be removed only after the legacy behavior inventory is retained
+and automated tests cover safe Markdown preview, QR creation from a stable board
+URL, and the new attachment flow.
 ```
 
-- [ ] **Step 5: Exclude generated modern tooling without hiding the archive**
+- [ ] **Step 4: Exclude generated modern tooling without hiding the archive**
 
 Append to `.gitignore`:
 
@@ -155,23 +142,22 @@ Append to `.gitignore`:
 
 Keep the existing `/.superpowers/` entry.
 
-- [ ] **Step 6: Verify the archive and fixture**
+- [ ] **Step 4: Verify the archive**
 
 Run:
 
 ```bash
 test -f legacy/client/src/App.js
 test -f legacy/server/app.js
-node -e "const value=require('./tests/fixtures/legacy-information.json'); if(typeof value.md!=='string'||typeof value.qr!=='string') process.exit(1)"
 git diff --check
 ```
 
 Expected: all commands exit 0.
 
-- [ ] **Step 7: Commit the characterized archive**
+- [ ] **Step 5: Commit the characterized archive**
 
 ```bash
-git add .gitignore legacy tests/fixtures/legacy-information.json docs/legacy-behavior.md
+git add .gitignore legacy docs/legacy-behavior.md
 git commit -m "chore: archive legacy prototype"
 ```
 
@@ -654,109 +640,7 @@ git commit -m "feat: validate application environment"
 
 ---
 
-### Task 4: Preserve the legacy JSON contract with a safe schema
-
-**Files:**
-- Create: `src/lib/legacy/schema.ts`
-- Create: `src/lib/legacy/schema.test.ts`
-- Test: `tests/fixtures/legacy-information.json`
-
-**Interfaces:**
-- Consumes: Task 1 legacy fixture and Zod.
-- Produces: `parseLegacyInformation(input: unknown): LegacyInformation`; `LegacyInformation = { md: string; qr: string }`.
-
-- [ ] **Step 1: Write failing characterization and rejection tests**
-
-Create `src/lib/legacy/schema.test.ts`:
-
-```ts
-import fixture from "../../../tests/fixtures/legacy-information.json";
-import { describe, expect, it } from "vitest";
-import { parseLegacyInformation } from "./schema";
-
-describe("parseLegacyInformation", () => {
-  it("accepts the archived md and qr shape", () => {
-    expect(parseLegacyInformation(fixture)).toEqual(fixture);
-  });
-
-  it("rejects unexpected properties", () => {
-    expect(() =>
-      parseLegacyInformation({ ...fixture, password: "secret" }),
-    ).toThrow("Unrecognized key");
-  });
-
-  it("rejects oversized markdown before import", () => {
-    expect(() =>
-      parseLegacyInformation({ md: "x".repeat(200_001), qr: fixture.qr }),
-    ).toThrow("Markdown must be at most 200000 characters");
-  });
-
-  it("rejects unsafe QR URL protocols", () => {
-    expect(() =>
-      parseLegacyInformation({ md: fixture.md, qr: "javascript:alert(1)" }),
-    ).toThrow("QR target must use http or https");
-  });
-});
-```
-
-- [ ] **Step 2: Run the tests to verify they fail**
-
-Run:
-
-```bash
-npm run test:run -- src/lib/legacy/schema.test.ts
-```
-
-Expected: FAIL because `parseLegacyInformation` does not exist.
-
-- [ ] **Step 3: Implement the strict legacy schema**
-
-Create `src/lib/legacy/schema.ts`:
-
-```ts
-import { z } from "zod";
-
-const qrUrl = z
-  .url()
-  .refine((value) => ["http:", "https:"].includes(new URL(value).protocol), {
-    message: "QR target must use http or https",
-  });
-
-const legacyInformationSchema = z
-  .object({
-    md: z.string().max(200_000, "Markdown must be at most 200000 characters"),
-    qr: qrUrl,
-  })
-  .strict();
-
-export type LegacyInformation = z.infer<typeof legacyInformationSchema>;
-
-export function parseLegacyInformation(input: unknown): LegacyInformation {
-  return legacyInformationSchema.parse(input);
-}
-```
-
-- [ ] **Step 4: Verify the contract**
-
-Run:
-
-```bash
-npm run test:run -- src/lib/legacy/schema.test.ts
-npm run typecheck
-```
-
-Expected: all four tests and type checking pass.
-
-- [ ] **Step 5: Commit the safe contract**
-
-```bash
-git add src/lib/legacy
-git commit -m "test: characterize legacy information format"
-```
-
----
-
-### Task 5: Add and verify application security headers
+### Task 4: Add and verify application security headers
 
 **Files:**
 - Create: `src/lib/security/policy.ts`
@@ -928,7 +812,7 @@ git commit -m "security: add baseline response headers"
 
 ---
 
-### Task 6: Build the approved bold-poster landing experience
+### Task 5: Build the approved bold-poster landing experience
 
 **Files:**
 - Create: `src/components/landing/hero.tsx`
@@ -1239,7 +1123,7 @@ git commit -m "feat: add bold poster landing page"
 
 ---
 
-### Task 7: Add browser smoke coverage and continuous integration
+### Task 6: Add browser smoke coverage and continuous integration
 
 **Files:**
 - Modify: `package.json`

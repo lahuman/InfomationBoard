@@ -1,7 +1,7 @@
 # InformationBoard Phase 3 Implementation Plan
 
 **Goal:** Deliver the authenticated board-owner workflow from creation through
-safe editing, recovery, import/export, and deletion.
+safe editing, recovery, and deletion.
 
 **Architecture:** Server Components load owner-scoped data, Server Actions own
 validated mutations, RLS independently enforces ownership, and a focused client
@@ -61,7 +61,7 @@ Library, Playwright, and pgTAP.
 5. Test invalid keys, boundary lengths, template defaults, and slug format.
 
 **Exit:** Shared schemas are the only accepted input contract for board
-mutations and imports.
+mutations.
 
 ## Task 3: Build the Safe Markdown Preview
 
@@ -160,32 +160,7 @@ their behalf.
 **Exit:** Autosave is loss-resistant and stale responses cannot overwrite newer
 content.
 
-## Task 7: Add Versioned Import and Export
-
-**Files**
-
-- Add `src/features/boards/transfer/schema.ts`
-- Add `src/features/boards/transfer/schema.test.ts`
-- Add `src/features/boards/transfer/import.ts`
-- Add `src/features/boards/transfer/import.test.ts`
-- Add `src/features/boards/transfer/export.ts`
-- Add `src/features/boards/transfer/export.test.ts`
-- Add `src/app/api/boards/[id]/export/route.ts`
-- Add `src/app/api/boards/[id]/export/route.test.ts`
-- Update `src/features/boards/create-board-form.tsx`
-
-**Steps**
-
-1. Define the strict version `1` export schema.
-2. Accept legacy `{md, qr}` and versioned JSON within 512 KB.
-3. Convert a safe legacy QR target to an optional Markdown link.
-4. Reject unknown fields, unsafe URLs, oversized files, and invalid JSON.
-5. Export owner-scoped data with private no-store headers.
-6. Verify secrets, identifiers, and attachments never appear in exports.
-
-**Exit:** Legacy and versioned data round-trip safely without private metadata.
-
-## Task 8: Add Deletion and Complete the Phase
+## Task 7: Add Deletion and Complete the Phase
 
 **Files**
 
@@ -201,7 +176,7 @@ content.
 1. Add an explicit delete confirmation.
 2. Delete with the authenticated RLS client and redirect to the dashboard.
 3. Verify missing and foreign IDs reveal no board information.
-4. Add E2E coverage for create, autosave, reopen, export, import, and delete.
+4. Add E2E coverage for create, autosave, reopen, and delete.
 5. Run the full verification block.
 6. Record the migration versions, test counts, build, audit, and secret-scan
    results.
@@ -228,4 +203,3 @@ npx supabase test db --linked supabase/tests/phase2_rls.test.sql
 
 Manual verification uses two authenticated accounts to confirm that a second
 owner cannot open or mutate the first owner's draft.
-

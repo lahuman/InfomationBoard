@@ -8,18 +8,20 @@
 
 Phase 3 turns the authenticated dashboard shell into a complete private draft
 workspace. A signed-in owner can create a board from a template, edit it with a
-safe live preview, recover unsaved work, import and export JSON, and delete the
-draft.
+safe live preview, recover unsaved work, and delete the draft.
 
 Publishing, public reads, password access, QR generation, and attachments remain
 assigned to later phases.
 
+Per-board JSON import and export are deliberately excluded. Supabase is the
+source of truth, and backup or restore remains an operational database concern
+rather than an owner-facing transfer feature.
+
 ## 2. Routes
 
 - `/dashboard`: owner-only board list, update status, and storage usage.
-- `/boards/new`: template selection, optional JSON import, and board creation.
+- `/boards/new`: template selection and board creation.
 - `/boards/[id]/edit`: owner-only editor and live preview.
-- `/api/boards/[id]/export`: authenticated versioned JSON download.
 
 All board reads and mutations use the authenticated server client so PostgreSQL
 RLS remains an independent ownership boundary.
@@ -56,7 +58,7 @@ validated theme. Theme values are controlled tokens rather than CSS:
 - density: `compact` or `comfortable`;
 - alignment: `left` or `center`.
 
-Unknown theme keys and values are rejected on both import and mutation.
+Unknown theme keys and values are rejected on mutation.
 
 ## 5. Dashboard and Creation
 
@@ -68,10 +70,10 @@ The dashboard queries the current profile and the owner's boards ordered by
 - `storage_bytes` against the 100 MB beta allowance;
 - a primary action to create a board.
 
-Board creation validates a template or imported draft, resolves the
-authenticated owner, generates a stable slug, inserts the draft, and redirects
-to its editor. Validation failures preserve the submitted fields and use
-field-specific Korean messages.
+Board creation validates the selected template, resolves the authenticated
+owner, generates a stable slug, inserts the draft, and redirects to its editor.
+Validation failures preserve the submitted fields and use field-specific Korean
+messages.
 
 ## 6. Editor and Autosave
 
@@ -103,49 +105,14 @@ Preview rendering never enables raw HTML. The renderer uses:
 - `rel="noopener noreferrer"` for external links;
 - no script, iframe, style, event-handler, or arbitrary HTML support.
 
-The server stores Markdown source, not rendered HTML. Export and import operate
-on that source.
+The server stores Markdown source, not rendered HTML.
 
-## 8. Import and Export
+## 8. Persistence
 
-Phase 3 accepts two JSON shapes:
-
-### Legacy shape
-
-```json
-{
-  "md": "# 안내",
-  "qr": "https://example.com"
-}
-```
-
-`md` becomes Markdown content. A valid HTTP(S) `qr` is offered as a related-link
-candidate and, when accepted, is appended as a Markdown link. It is never
-loaded, fetched, or executed during import.
-
-### Versioned shape
-
-```json
-{
-  "version": 1,
-  "board": {
-    "title": "안내판",
-    "summary": "요약",
-    "contentMarkdown": "# 안내",
-    "template": "event",
-    "theme": {
-      "palette": "coral",
-      "density": "comfortable",
-      "alignment": "left"
-    }
-  }
-}
-```
-
-Import is limited to 512 KB and validates parsed JSON with strict schemas.
-Export excludes owner identifiers, slug, authentication data, attachment
-metadata, secrets, and signed URLs. The response is a UTF-8 JSON attachment
-with `Cache-Control: private, no-store`.
+All owner changes are stored directly in Supabase through authenticated,
+RLS-protected mutations. The application does not expose per-board JSON import
+or export. Database backup and restore procedures belong to the release and
+operations plan.
 
 ## 9. Deletion
 
@@ -158,23 +125,21 @@ safe outcome without exposing another owner's board.
 
 - Migration and pgTAP tests cover revision increments and cross-owner denial.
 - Unit tests cover board schemas, templates, slug generation, theme validation,
-  safe links, and import/export shapes.
+  and safe links.
 - Component tests cover dashboard states, editor tabs, save statuses,
   conflict/recovery behavior, and delete confirmation.
 - Route/action tests cover unauthenticated access, owner reads and mutations,
-  stale revisions, export headers, and safe errors.
-- E2E tests cover create, autosave, reopen, import, export, delete, and protected
-  access.
+  stale revisions, and safe errors.
+- E2E tests cover create, autosave, reopen, delete, and protected access.
 
 ## 11. Exit Gate
 
 Phase 3 is complete when:
 
-- an owner can create, autosave, reopen, export, import, and delete a draft;
+- an owner can create, autosave, reopen, and delete a draft;
 - stale saves never overwrite newer content;
 - a second account cannot read or mutate the draft;
 - raw HTML and unsafe links cannot execute;
 - offline and stale-response recovery tests pass;
 - lint, typecheck, unit tests, E2E tests, build, dependency audit, and secret
   scan pass.
-

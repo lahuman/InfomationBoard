@@ -18,8 +18,7 @@ Deliver:
   Playwright;
 - add environment validation, security headers, CI quality gates, and the
   approved bold-poster landing shell;
-- record the old behavior and preserve a valid legacy `information.json`
-  fixture.
+- record the old `information.json` behavior as historical reference.
 
 Exit gate:
 
@@ -59,13 +58,11 @@ Deliver:
 - dashboard board list and storage meter;
 - board creation, draft update, autosave conflict protection, and deletion;
 - desktop split editor and mobile edit/preview tabs;
-- safe Markdown rendering;
-- legacy JSON import and versioned JSON export.
+- safe Markdown rendering.
 
 Exit gate:
 
-- a signed-in owner can create, autosave, reopen, export, import, and delete a
-  draft;
+- a signed-in owner can create, autosave, reopen, and delete a draft;
 - a second account cannot read or mutate the draft;
 - raw HTML and unsafe links cannot execute;
 - recovery-copy tests cover offline and stale-response behavior.
