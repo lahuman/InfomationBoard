@@ -1,0 +1,388 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { BoardMarkdown } from "../markdown/board-markdown";
+import type { UpdateBoardInput } from "../schema";
+import type { UpdateBoardResult } from "../actions/update-board";
+import type { EditorBoard, EditorDraft } from "./editor-board";
+import {
+  clearRecoveryCopy,
+  loadRecoveryCopy,
+  saveRecoveryCopy,
+  type RecoveryCopy,
+} from "./recovery";
+
+const AUTOSAVE_DELAY_MS = 750;
+
+type SaveState =
+  | "saved"
+  | "dirty"
+  | "saving"
+  | "offline"
+  | "failed"
+  | "conflict";
+
+const saveLabels: Record<SaveState, string> = {
+  saved: "저장됨",
+  dirty: "저장 대기",
+  saving: "저장 중",
+  offline: "오프라인 보관됨",
+  failed: "저장 실패",
+  conflict: "저장 충돌",
+};
+
+type BoardEditorProps = {
+  board: EditorBoard;
+  updateBoardAction: (
+    input: UpdateBoardInput,
+  ) => Promise<UpdateBoardResult>;
+};
+
+function toDraft(board: EditorBoard): EditorDraft {
+  return {
+    title: board.title,
+    summary: board.summary,
+    contentMarkdown: board.contentMarkdown,
+    theme: board.theme,
+  };
+}
+
+export function BoardEditor({
+  board,
+  updateBoardAction,
+}: BoardEditorProps) {
+  const [draft, setDraft] = useState<EditorDraft>(() => toDraft(board));
+  const [revision, setRevision] = useState(board.revision);
+  const [saveState, setSaveState] = useState<SaveState>("saved");
+  const [activeTab, setActiveTab] = useState<"edit" | "preview">("edit");
+  const [conflict, setConflict] = useState<EditorBoard | null>(null);
+  const [recovery, setRecovery] = useState<RecoveryCopy | null>(null);
+
+  const draftRef = useRef(draft);
+  const revisionRef = useRef(revision);
+  const inFlightRef = useRef(false);
+  const queuedRef = useRef(false);
+  const mountedRef = useRef(false);
+  const skipNextAutosaveRef = useRef(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const runSaveRef = useRef<() => Promise<void>>(async () => undefined);
+
+  draftRef.current = draft;
+  revisionRef.current = revision;
+
+  const runSave = useCallback(async () => {
+    if (inFlightRef.current) {
+      queuedRef.current = true;
+      return;
+    }
+
+    inFlightRef.current = true;
+    queuedRef.current = false;
+    const snapshot = draftRef.current;
+    const requestRevision = revisionRef.current;
+    setSaveState("saving");
+
+    let result: UpdateBoardResult;
+    try {
+      result = await updateBoardAction({
+        id: board.id,
+        revision: requestRevision,
+        ...snapshot,
+      });
+    } catch {
+      saveRecoveryCopy(board.id, {
+        savedAt: new Date().toISOString(),
+        revision: requestRevision,
+        draft: draftRef.current,
+      });
+      setSaveState("offline");
+      inFlightRef.current = false;
+      return;
+    }
+
+    if (result.status === "saved") {
+      revisionRef.current = result.revision;
+      setRevision(result.revision);
+      setConflict(null);
+
+      const hasNewerDraft =
+        queuedRef.current || draftRef.current !== snapshot;
+      if (hasNewerDraft) {
+        setSaveState("dirty");
+      } else {
+        clearRecoveryCopy(board.id);
+        setSaveState("saved");
+      }
+
+      inFlightRef.current = false;
+      if (hasNewerDraft) {
+        void runSaveRef.current();
+      }
+      return;
+    }
+
+    if (result.status === "conflict") {
+      setConflict(result.serverBoard);
+      setSaveState("conflict");
+    } else {
+      setSaveState("failed");
+    }
+
+    saveRecoveryCopy(board.id, {
+      savedAt: new Date().toISOString(),
+      revision: requestRevision,
+      draft: draftRef.current,
+    });
+    inFlightRef.current = false;
+  }, [board.id, updateBoardAction]);
+
+  runSaveRef.current = runSave;
+
+  useEffect(() => {
+    const localCopy = loadRecoveryCopy(board.id);
+    if (
+      localCopy &&
+      Date.parse(localCopy.savedAt) > Date.parse(board.updatedAt)
+    ) {
+      setRecovery(localCopy);
+    }
+  }, [board.id, board.updatedAt]);
+
+  useEffect(() => {
+    if (!mountedRef.current) {
+      mountedRef.current = true;
+      return;
+    }
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
+
+    setSaveState("dirty");
+    saveRecoveryCopy(board.id, {
+      savedAt: new Date().toISOString(),
+      revision: revisionRef.current,
+      draft,
+    });
+
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => {
+      void runSaveRef.current();
+    }, AUTOSAVE_DELAY_MS);
+
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [board.id, draft]);
+
+  function updateDraft(patch: Partial<EditorDraft>) {
+    setDraft((current) => ({ ...current, ...patch }));
+  }
+
+  function loadServerConflict() {
+    if (!conflict) return;
+    skipNextAutosaveRef.current = true;
+    const serverDraft = toDraft(conflict);
+    draftRef.current = serverDraft;
+    revisionRef.current = conflict.revision;
+    setDraft(serverDraft);
+    setRevision(conflict.revision);
+    setConflict(null);
+    clearRecoveryCopy(board.id);
+    setSaveState("saved");
+  }
+
+  function retryLocalConflict() {
+    if (!conflict) return;
+    revisionRef.current = conflict.revision;
+    setRevision(conflict.revision);
+    setConflict(null);
+    setSaveState("dirty");
+    void runSaveRef.current();
+  }
+
+  function restoreRecovery() {
+    if (!recovery) return;
+    setDraft(recovery.draft);
+    setRevision(recovery.revision);
+    setRecovery(null);
+  }
+
+  function discardRecovery() {
+    clearRecoveryCopy(board.id);
+    setRecovery(null);
+  }
+
+  return (
+    <div className="board-editor">
+      <div className="editor-toolbar">
+        <div role="tablist" aria-label="편집 화면">
+          <button
+            aria-controls="board-edit-panel"
+            aria-selected={activeTab === "edit"}
+            onClick={() => setActiveTab("edit")}
+            role="tab"
+            type="button"
+          >
+            편집
+          </button>
+          <button
+            aria-controls="board-preview-panel"
+            aria-selected={activeTab === "preview"}
+            onClick={() => setActiveTab("preview")}
+            role="tab"
+            type="button"
+          >
+            미리보기
+          </button>
+        </div>
+        <p className={`save-state save-state-${saveState}`} role="status">
+          {saveLabels[saveState]}
+        </p>
+      </div>
+
+      {recovery ? (
+        <aside className="editor-notice" aria-labelledby="recovery-title">
+          <div>
+            <strong id="recovery-title">저장되지 않은 복구본이 있습니다.</strong>
+            <p>서버 초안보다 새로운 로컬 작업을 복구할 수 있습니다.</p>
+          </div>
+          <div>
+            <button type="button" onClick={restoreRecovery}>
+              복구하기
+            </button>
+            <button type="button" onClick={discardRecovery}>
+              버리기
+            </button>
+          </div>
+        </aside>
+      ) : null}
+
+      {conflict ? (
+        <aside className="editor-notice editor-conflict" aria-labelledby="conflict-title">
+          <div>
+            <strong id="conflict-title">다른 저장 내용이 발견됐습니다.</strong>
+            <p>로컬 내용은 보관했습니다. 사용할 내용을 선택해 주세요.</p>
+          </div>
+          <div>
+            <button type="button" onClick={loadServerConflict}>
+              서버 내용 불러오기
+            </button>
+            <button type="button" onClick={retryLocalConflict}>
+              내 내용으로 다시 저장
+            </button>
+          </div>
+        </aside>
+      ) : null}
+
+      <div className="editor-layout">
+        <section
+          className="editor-form-panel"
+          data-active={activeTab === "edit"}
+          id="board-edit-panel"
+          role="tabpanel"
+        >
+          <label htmlFor="board-title">제목</label>
+          <input
+            id="board-title"
+            maxLength={120}
+            onChange={(event) =>
+              updateDraft({ title: event.currentTarget.value })
+            }
+            value={draft.title}
+          />
+
+          <label htmlFor="board-summary">요약</label>
+          <textarea
+            id="board-summary"
+            maxLength={300}
+            onChange={(event) =>
+              updateDraft({ summary: event.currentTarget.value })
+            }
+            rows={3}
+            value={draft.summary}
+          />
+
+          <label htmlFor="board-content">본문 Markdown</label>
+          <textarea
+            id="board-content"
+            maxLength={200_000}
+            onChange={(event) =>
+              updateDraft({ contentMarkdown: event.currentTarget.value })
+            }
+            rows={22}
+            value={draft.contentMarkdown}
+          />
+
+          <div className="theme-fields">
+            <label>
+              색상
+              <select
+                onChange={(event) =>
+                  updateDraft({
+                    theme: {
+                      ...draft.theme,
+                      palette: event.currentTarget.value as EditorDraft["theme"]["palette"],
+                    },
+                  })
+                }
+                value={draft.theme.palette}
+              >
+                <option value="coral">코랄</option>
+                <option value="blue">블루</option>
+                <option value="lime">라임</option>
+              </select>
+            </label>
+            <label>
+              여백
+              <select
+                onChange={(event) =>
+                  updateDraft({
+                    theme: {
+                      ...draft.theme,
+                      density: event.currentTarget.value as EditorDraft["theme"]["density"],
+                    },
+                  })
+                }
+                value={draft.theme.density}
+              >
+                <option value="comfortable">여유롭게</option>
+                <option value="compact">촘촘하게</option>
+              </select>
+            </label>
+            <label>
+              정렬
+              <select
+                onChange={(event) =>
+                  updateDraft({
+                    theme: {
+                      ...draft.theme,
+                      alignment: event.currentTarget.value as EditorDraft["theme"]["alignment"],
+                    },
+                  })
+                }
+                value={draft.theme.alignment}
+              >
+                <option value="left">왼쪽</option>
+                <option value="center">가운데</option>
+              </select>
+            </label>
+          </div>
+        </section>
+
+        <section
+          className={`editor-preview-panel theme-${draft.theme.palette} density-${draft.theme.density} align-${draft.theme.alignment}`}
+          data-active={activeTab === "preview"}
+          id="board-preview-panel"
+          role="tabpanel"
+        >
+          <p className="preview-kicker">{board.template.toUpperCase()}</p>
+          <h2>{draft.title || "제목 없는 안내판"}</h2>
+          {draft.summary ? <p className="preview-summary">{draft.summary}</p> : null}
+          <BoardMarkdown markdown={draft.contentMarkdown} />
+        </section>
+      </div>
+    </div>
+  );
+}
+

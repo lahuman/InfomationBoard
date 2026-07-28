@@ -48,6 +48,10 @@ export const boardDraftSchema = z
   })
   .strict();
 
+export const editorDraftSchema = boardDraftSchema
+  .omit({ template: true })
+  .strict();
+
 export const createBoardInputSchema = z
   .object({
     template: boardTemplateSchema,
@@ -70,4 +74,3 @@ export type BoardTheme = z.infer<typeof boardThemeSchema>;
 export type BoardDraft = z.infer<typeof boardDraftSchema>;
 export type CreateBoardInput = z.infer<typeof createBoardInputSchema>;
 export type UpdateBoardInput = z.infer<typeof updateBoardInputSchema>;
-
