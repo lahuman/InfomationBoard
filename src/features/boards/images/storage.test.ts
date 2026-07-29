@@ -25,12 +25,14 @@ const mocks = vi.hoisted(() => ({
   storageFrom: vi.fn(),
   download: vi.fn(),
   remove: vi.fn(),
+  adminRpc: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminSupabaseClient: vi.fn(() => ({
     from: mocks.from,
+    rpc: mocks.adminRpc,
     storage: { from: mocks.storageFrom },
   })),
 }));
@@ -50,6 +52,7 @@ beforeEach(() => {
     error: null,
   });
   mocks.remove.mockResolvedValue({ data: [], error: null });
+  mocks.adminRpc.mockResolvedValue({ data: undefined, error: null });
 });
 
 describe("Storage object errors", () => {
@@ -152,7 +155,12 @@ describe("cancelBoardImageReservation", () => {
       calls.push(name);
       if (name === "claim_board_image_cancellation") {
         return {
-          data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
+          data: [{
+            id: attachmentId,
+            owner_id: ownerId,
+            storage_path: storagePath,
+            state: "cancelling",
+          }],
           error: null,
         };
       }
@@ -161,6 +169,10 @@ describe("cancelBoardImageReservation", () => {
     mocks.remove.mockImplementationOnce(async () => {
       calls.push("remove");
       return { data: [], error: null };
+    });
+    mocks.adminRpc.mockImplementationOnce(async () => {
+      calls.push("complete_board_image_cancellation");
+      return { data: undefined, error: null };
     });
 
     await expect(
@@ -172,10 +184,15 @@ describe("cancelBoardImageReservation", () => {
       p_attachment_id: attachmentId,
     });
     expect(mocks.remove).toHaveBeenCalledWith([storagePath]);
-    expect(rpc).toHaveBeenNthCalledWith(2, "complete_board_image_cancellation", {
-      p_board_id: boardId,
-      p_attachment_id: attachmentId,
-    });
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.adminRpc).toHaveBeenCalledWith(
+      "complete_board_image_cancellation",
+      {
+        p_owner_id: ownerId,
+        p_board_id: boardId,
+        p_attachment_id: attachmentId,
+      },
+    );
     expect(calls).toEqual([
       "claim_board_image_cancellation",
       "remove",
@@ -183,9 +200,38 @@ describe("cancelBoardImageReservation", () => {
     ]);
   });
 
+  it("does not let the authenticated client invoke completion", async () => {
+    const rpc = vi.fn(async () => ({
+      data: [{
+        id: attachmentId,
+        owner_id: ownerId,
+        storage_path: storagePath,
+        state: "cancelling",
+      }],
+      error: null,
+    }));
+
+    await cancelBoardImageReservation(
+      boardId,
+      attachmentId,
+      { rpc } as never,
+    );
+
+    expect(rpc).toHaveBeenCalledTimes(1);
+    expect(rpc).not.toHaveBeenCalledWith("complete_board_image_cancellation", {
+      p_board_id: boardId,
+      p_attachment_id: attachmentId,
+    });
+  });
+
   it("keeps the cancelling row and quota when removal fails", async () => {
     const rpc = vi.fn(async () => ({
-      data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
+      data: [{
+        id: attachmentId,
+        owner_id: ownerId,
+        storage_path: storagePath,
+        state: "cancelling",
+      }],
       error: null,
     }));
     mocks.remove.mockResolvedValueOnce({
@@ -198,13 +244,19 @@ describe("cancelBoardImageReservation", () => {
     ).resolves.toEqual({ ok: false });
 
     expect(rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.adminRpc).not.toHaveBeenCalled();
   });
 
   it("continues completion only for exact object-missing", async () => {
     const rpc = vi.fn(async (name: string) =>
       name === "claim_board_image_cancellation"
         ? {
-            data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
+            data: [{
+              id: attachmentId,
+              owner_id: ownerId,
+              storage_path: storagePath,
+              state: "cancelling",
+            }],
             error: null,
           }
         : { data: undefined, error: null },
@@ -221,9 +273,13 @@ describe("cancelBoardImageReservation", () => {
     await expect(
       cancelBoardImageReservation(boardId, attachmentId, { rpc } as never),
     ).resolves.toEqual({ ok: true });
-    expect(rpc).toHaveBeenLastCalledWith(
+    expect(mocks.adminRpc).toHaveBeenCalledWith(
       "complete_board_image_cancellation",
-      { p_board_id: boardId, p_attachment_id: attachmentId },
+      {
+        p_owner_id: ownerId,
+        p_board_id: boardId,
+        p_attachment_id: attachmentId,
+      },
     );
   });
 });
@@ -244,6 +300,7 @@ describe("cleanupExpiredBoardImages", () => {
         return {
           data: [{
             id: args.p_attachment_id,
+            owner_id: ownerId,
             storage_path: args.p_attachment_id === attachmentId ? storagePath : cancellingPath,
             state: "cancelling",
           }],
@@ -261,6 +318,7 @@ describe("cleanupExpiredBoardImages", () => {
       `state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.2026-07-29T10:00:00.000Z)`,
     );
     expect(mocks.remove).toHaveBeenCalledTimes(2);
-    expect(rpc).toHaveBeenCalledTimes(4);
+    expect(rpc).toHaveBeenCalledTimes(2);
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(2);
   });
 });

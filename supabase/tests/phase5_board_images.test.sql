@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(73);
+select plan(79);
 
 select has_function(
   'public',
@@ -23,8 +23,26 @@ select has_function(
 select has_function(
   'public',
   'complete_board_image_cancellation',
-  array['uuid', 'uuid'],
-  'claimed image cancellation completion uses an authenticated RPC boundary'
+  array['uuid', 'uuid', 'uuid'],
+  'claimed image cancellation completion uses an explicit server-only boundary'
+);
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.complete_board_image_cancellation(uuid,uuid,uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_board_image_cancellation(uuid,uuid,uuid)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.complete_board_image_cancellation(uuid,uuid,uuid)',
+    'EXECUTE'
+  ),
+  'only service_role can execute cancellation completion'
 );
 select has_function(
   'public',
@@ -292,6 +310,12 @@ select results_eq(
      where original_filename = 'poster.png' $$,
   'claiming an already-cancelling image is idempotent'
 );
+select results_eq(
+  $$ select storage_bytes from public.profiles
+     where id = '10000000-0000-4000-8000-000000000001' $$,
+  array[10485760::bigint],
+  'cancelling bytes remain charged until trusted completion'
+);
 select throws_ok(
   $$ insert into storage.objects (bucket_id, name, owner_id)
      select 'board-images', storage_path, auth.uid()
@@ -300,11 +324,50 @@ select throws_ok(
   '42501', null,
   'authenticated uploads are denied after cancellation is claimed'
 );
-select lives_ok(
-  $$ select public.complete_board_image_cancellation(board_id, id)
+select throws_ok(
+  $$ select public.complete_board_image_cancellation(owner_id, board_id, id)
      from public.attachments
      where original_filename = 'poster.png' $$,
-  'an owner completes a claimed cancellation'
+  '42501', null,
+  'an authenticated owner cannot complete a claimed cancellation directly'
+);
+select set_config(
+  'test.poster_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'poster.png'
+  ),
+  true
+);
+reset role;
+select results_eq(
+  $$ select count(*)::bigint
+     from storage.objects
+     where bucket_id = 'board-images'
+       and name = (
+         select storage_path
+         from public.attachments
+         where original_filename = 'poster.png'
+       ) $$,
+  array[1::bigint],
+  'denied direct completion leaves the stored object and metadata intact'
+);
+set local role service_role;
+select lives_ok(
+  $$ select public.complete_board_image_cancellation(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.poster_attachment_id')::uuid
+     ) $$,
+  'service role completes a server-verified cancellation'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
@@ -350,18 +413,40 @@ select lives_ok(
   'a full board does not consume another board image count'
 );
 select lives_ok(
-  $$ with claimed as (
-       select claimed.id, attachments.board_id
-       from public.attachments
-       cross join lateral public.claim_board_image_cancellation(
-         attachments.board_id,
-         attachments.id
-       ) as claimed
-       where attachments.original_filename = 'other-board.png'
-     )
-     select public.complete_board_image_cancellation(board_id, id)
-     from claimed $$,
-  'the separate-board count fixture can be cancelled'
+  $$ select claimed.*
+     from public.attachments
+     cross join lateral public.claim_board_image_cancellation(
+       attachments.board_id,
+       attachments.id
+     ) as claimed
+     where attachments.original_filename = 'other-board.png' $$,
+  'the separate-board count fixture can be claimed for cancellation'
+);
+select set_config(
+  'test.other_board_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'other-board.png'
+  ),
+  true
+);
+reset role;
+set local role service_role;
+select lives_ok(
+  $$ select public.complete_board_image_cancellation(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.other_board_attachment_id')::uuid
+     ) $$,
+  'service role completes the separate-board fixture cancellation'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
@@ -416,18 +501,40 @@ select throws_ok(
   'authenticated uploads are denied after reservation expiry'
 );
 select lives_ok(
-  $$ with claimed as (
-       select claimed.id, attachments.board_id
-       from public.attachments
-       cross join lateral public.claim_board_image_cancellation(
-         attachments.board_id,
-         attachments.id
-       ) as claimed
-       where attachments.original_filename = 'expired.png'
-     )
-     select public.complete_board_image_cancellation(board_id, id)
-     from claimed $$,
-  'an expired reservation can still be cancelled'
+  $$ select claimed.*
+     from public.attachments
+     cross join lateral public.claim_board_image_cancellation(
+       attachments.board_id,
+       attachments.id
+     ) as claimed
+     where attachments.original_filename = 'expired.png' $$,
+  'an expired reservation can still be claimed for cancellation'
+);
+select set_config(
+  'test.expired_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'expired.png'
+  ),
+  true
+);
+reset role;
+set local role service_role;
+select lives_ok(
+  $$ select public.complete_board_image_cancellation(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.expired_attachment_id')::uuid
+     ) $$,
+  'service role completes the expired reservation cancellation'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 
 select results_eq(
@@ -766,7 +873,7 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
-    'public.complete_board_image_cancellation(uuid,uuid)',
+    'public.complete_board_image_cancellation(uuid,uuid,uuid)',
     'EXECUTE'
   )
   and not has_function_privilege(

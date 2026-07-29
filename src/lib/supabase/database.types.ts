@@ -176,6 +176,7 @@ export type Database = {
         Args: { p_attachment_id: string; p_board_id: string }
         Returns: {
           id: string
+          owner_id: string
           state: string
           storage_path: string
         }[]
@@ -185,7 +186,11 @@ export type Database = {
         Returns: undefined
       }
       complete_board_image_cancellation: {
-        Args: { p_attachment_id: string; p_board_id: string }
+        Args: {
+          p_attachment_id: string
+          p_board_id: string
+          p_owner_id: string
+        }
         Returns: undefined
       }
       delete_board_image_record: {

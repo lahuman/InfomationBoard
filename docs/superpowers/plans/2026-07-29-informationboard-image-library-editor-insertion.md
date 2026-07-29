@@ -10,7 +10,7 @@
 
 ## Global Constraints
 
-- Account limit is exactly `52,428,800` bytes (50 MiB), counting both `reserved` and `ready` rows.
+- Account limit is exactly `52,428,800` bytes (50 MiB), counting `reserved`, `cancelling`, and `ready` rows until metadata deletion releases quota.
 - Per-image limit is exactly `10,485,760` bytes (10 MiB), with no more than 20 reserved, cancelling, or ready images per board.
 - Reservations expire after 15 minutes and are reclaimed before the next list or reservation operation; no scheduler is required.
 - Only JPEG (`image/jpeg`), PNG (`image/png`), WebP (`image/webp`), and GIF (`image/gif`) are accepted; SVG and general files remain out of scope.
@@ -204,7 +204,7 @@ git commit -m "feat: define image limits and references"
 
 **Interfaces:**
 - Consumes: exact byte, MIME, count, bucket, and expiry constants from Task 1, duplicated as SQL literals at the database trust boundary.
-- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `claim_board_image_cancellation(uuid,uuid)`, `complete_board_image_cancellation(uuid,uuid)`, and `delete_board_image_record(uuid)` plus updated generated TypeScript signatures.
+- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `claim_board_image_cancellation(uuid,uuid)`, service-role-only `complete_board_image_cancellation(uuid,uuid,uuid)`, and `delete_board_image_record(uuid)` plus updated generated TypeScript signatures.
 
 - [ ] **Step 1: Write failing pgTAP coverage**
 
@@ -279,7 +279,7 @@ Do not add client SELECT, UPDATE, DELETE, list, move, or overwrite policies.
 
 - [ ] **Step 4: Implement least-privilege lifecycle RPCs**
 
-Each function is `security definer set search_path = ''`, checks `auth.uid()`, schema-qualifies every relation, and raises only stable application codes such as `image_quota_exceeded`, `image_limit_exceeded`, `image_not_found`, or `image_reservation_expired`.
+Each function is `security definer set search_path = ''`, schema-qualifies every relation, and raises only stable application codes such as `image_quota_exceeded`, `image_limit_exceeded`, `image_not_found`, or `image_reservation_expired`. Authenticated lifecycle functions check `auth.uid()`; trusted cancellation completion instead accepts explicit owner, board, and attachment IDs and is executable only by `service_role`.
 
 `reserve_board_image` generates `attachment_id := gen_random_uuid()`, verifies board ownership, counts active rows, and inserts:
 
@@ -290,7 +290,7 @@ reservation_expires_at := now() + interval '15 minutes';
 
 It returns `id`, `storage_path`, `original_filename`, `mime_type`, `size_bytes`, and `reservation_expires_at`. `finalize_board_image` locks the owned reservation, applies verified MIME/actual size, sets `state = 'ready'`, clears expiry, and returns the ready row; if already ready with identical metadata, return it unchanged, and if `cancelling`, raise `image_cancellation_in_progress`.
 
-`claim_board_image_cancellation(board_id, attachment_id)` locks the exact owned row, atomically changes `reserved` to `cancelling`, and idempotently returns the same path when already cancelling. `complete_board_image_cancellation(board_id, attachment_id)` deletes only the exact owned cancelling row after server object removal, releasing quota through the delete trigger. `delete_board_image_record` deletes only an owned ready row and returns whether one row was removed. Revoke public execution and grant only the intended RPCs to `authenticated`.
+`claim_board_image_cancellation(board_id, attachment_id)` locks the exact owned row, atomically changes `reserved` to `cancelling`, and idempotently returns its ID, owner ID, and same path when already cancelling. `complete_board_image_cancellation(owner_id, board_id, attachment_id)` deletes only that exact cancelling row after server object removal, releasing quota through the delete trigger. Revoke completion from `public`, `anon`, and `authenticated`, granting it only to `service_role`; grant the user-facing lifecycle RPCs only to `authenticated`. `delete_board_image_record` deletes only an owned ready row and returns whether one row was removed.
 
 - [ ] **Step 5: Regenerate and inspect TypeScript database types**
 
@@ -452,7 +452,7 @@ if (!mimeType) throw new InvalidStoredImageError();
 
 Return verified bytes and MIME only; never trust the filename or upload header. Treat an object as missing only for the exact `{ name: "StorageApiError", status: 404, message: "Object not found" }` shape.
 
-`cancelBoardImageReservation(boardId, attachmentId, authenticatedClient)` first calls `claim_board_image_cancellation`, removes only the returned server path, and calls `complete_board_image_cancellation` only after removal succeeds or returns that exact missing-object response. A removal failure leaves the row `cancelling` with quota intact for retry. `cleanupExpiredBoardImages(ownerId, authenticatedClient)` selects the owner's expired reserved and already-cancelling rows and routes every candidate through this same helper. Call it before both reservation and `getBoardImageLibrary` so opening the panel also reclaims stale quota.
+`cancelBoardImageReservation(boardId, attachmentId, authenticatedClient)` first calls `claim_board_image_cancellation`, removes only the returned server path with the admin client, and invokes service-role-only `complete_board_image_cancellation(ownerId, boardId, attachmentId)` through that admin client only after removal succeeds or returns the exact missing-object response. The authenticated client is never used for completion. A removal failure leaves the row `cancelling` with quota intact for retry. `cleanupExpiredBoardImages(ownerId, authenticatedClient)` selects the owner's expired reserved and already-cancelling rows and routes every candidate through this same helper. Call it before both reservation and `getBoardImageLibrary` so opening the panel also reclaims stale quota.
 
 - [ ] **Step 5: Implement the three server actions**
 

@@ -100,7 +100,9 @@ quota-owned profile fields and attachment lifecycle fields are revoked; exposed
 database functions are the supported mutation boundary.
 
 Reserved bytes count immediately. This prevents parallel and abandoned uploads
-from bypassing the quota. Failed uploads explicitly cancel their reservation.
+from bypassing the quota. A `cancelling` row remains charged until trusted
+completion deletes it, so failed object removal cannot release reusable quota.
+Failed uploads explicitly cancel their reservation.
 Expired reservations and any matching objects are reclaimed by the server
 before subsequent list or reservation operations. A scheduler is not required
 for the first release.
@@ -262,6 +264,10 @@ failed storage cleanup prevents board deletion and returns a retryable error.
   removal. Retrying a `cancelling` row resumes the same exact path; completion
   deletes metadata and releases quota only after removal succeeds or Storage
   returns the exact `StorageApiError` 404 `Object not found` response.
+- Cancellation completion accepts explicit owner, board, and attachment IDs,
+  is executable only by `service_role`, and is called through the server-only
+  admin client. Authenticated and anonymous clients cannot release a claimed
+  row or its quota directly.
 - Finalization refuses `cancelling` rows, so cleanup and readiness cannot race.
 
 ## 11. Testing and Verification
@@ -319,8 +325,8 @@ Implementation is test-driven.
 ## 12. Acceptance Criteria
 
 The feature is complete when every account is authoritatively limited to 50 MB
-of reserved plus ready images; an owner can upload, view, insert, and safely
-delete board images; the dashboard and editor show accurate usage; rich and
+of reserved, ready, and cancelling images; an owner can upload, view, insert,
+and safely delete board images; the dashboard and editor show accurate usage; rich and
 source editing preserve inserted image Markdown; image delivery follows the
 parent board's access rules; failures do not leak data, strand quota, or create
 silent broken references; and the database, component, server, build, and

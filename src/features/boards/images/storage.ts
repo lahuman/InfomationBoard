@@ -18,6 +18,7 @@ const cleanupCandidateSchema = z
 const cancellationClaimSchema = z
   .object({
     id: z.uuid(),
+    owner_id: z.uuid(),
     storage_path: z.string().min(1),
     state: z.literal("cancelling"),
   })
@@ -158,10 +159,12 @@ export async function cancelBoardImageReservation(
   const claim = claims.success ? claims.data.at(0) : undefined;
   if (!claim || claim.id !== attachmentId) return { ok: false };
 
+  let adminClient;
   let removeResult;
   try {
-    removeResult = await createAdminSupabaseClient()
-      .storage.from(IMAGE_BUCKET)
+    adminClient = createAdminSupabaseClient();
+    removeResult = await adminClient.storage
+      .from(IMAGE_BUCKET)
       .remove([claim.storage_path]);
   } catch {
     return { ok: false };
@@ -176,9 +179,13 @@ export async function cancelBoardImageReservation(
 
   let completeResult;
   try {
-    completeResult = await authenticatedClient.rpc(
+    completeResult = await adminClient.rpc(
       "complete_board_image_cancellation",
-      { p_board_id: boardId, p_attachment_id: attachmentId },
+      {
+        p_owner_id: claim.owner_id,
+        p_board_id: boardId,
+        p_attachment_id: attachmentId,
+      },
     );
   } catch {
     return { ok: false };

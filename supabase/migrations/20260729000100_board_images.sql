@@ -384,6 +384,7 @@ create function public.claim_board_image_cancellation(
 )
 returns table (
   id uuid,
+  owner_id uuid,
   storage_path text,
   state text
 )
@@ -427,12 +428,14 @@ begin
   return query
   select
     owned_attachment.id,
+    owned_attachment.owner_id,
     owned_attachment.storage_path,
     owned_attachment.state;
 end;
 $$;
 
 create function public.complete_board_image_cancellation(
+  p_owner_id uuid,
   p_board_id uuid,
   p_attachment_id uuid
 )
@@ -441,17 +444,11 @@ language plpgsql
 security definer
 set search_path = ''
 as $$
-declare
-  account_id uuid := auth.uid();
 begin
-  if account_id is null then
-    raise exception 'image_not_found';
-  end if;
-
   delete from public.attachments
   where attachments.id = p_attachment_id
     and attachments.board_id = p_board_id
-    and attachments.owner_id = account_id
+    and attachments.owner_id = p_owner_id
     and attachments.state = 'cancelling';
 
   if not found then
@@ -488,8 +485,8 @@ revoke all on function public.finalize_board_image(uuid, text, bigint)
 from public, anon, authenticated;
 revoke all on function public.claim_board_image_cancellation(uuid, uuid)
 from public, anon, authenticated;
-revoke all on function public.complete_board_image_cancellation(uuid, uuid)
-from public, anon, authenticated;
+revoke all on function public.complete_board_image_cancellation(uuid, uuid, uuid)
+from public, anon, authenticated, service_role;
 revoke all on function public.delete_board_image_record(uuid)
 from public, anon, authenticated;
 
@@ -499,8 +496,8 @@ grant execute on function public.finalize_board_image(uuid, text, bigint)
 to authenticated;
 grant execute on function public.claim_board_image_cancellation(uuid, uuid)
 to authenticated;
-grant execute on function public.complete_board_image_cancellation(uuid, uuid)
-to authenticated;
+grant execute on function public.complete_board_image_cancellation(uuid, uuid, uuid)
+to service_role;
 grant execute on function public.delete_board_image_record(uuid)
 to authenticated;
 
