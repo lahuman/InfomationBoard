@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(61);
+select plan(62);
 
 select has_function(
   'public',
@@ -35,6 +35,39 @@ select ok(
     )
   ) > 0,
   'reservation locks the owned board before the profile row'
+);
+select results_eq(
+  $$ with migration_statements as (
+       select
+         upper(btrim(statement)) as statement,
+         ordinality
+       from supabase_migrations.schema_migrations
+       cross join lateral unnest(statements)
+         with ordinality as migration_statement(statement, ordinality)
+       where version = '20260729000100'
+     )
+     select coalesce(
+       min(ordinality) filter (where statement = 'BEGIN')
+         < min(ordinality) filter (
+           where statement =
+             'LOCK TABLE PUBLIC.ATTACHMENTS IN SHARE ROW EXCLUSIVE MODE'
+         )
+       and min(ordinality) filter (
+         where statement =
+           'LOCK TABLE PUBLIC.ATTACHMENTS IN SHARE ROW EXCLUSIVE MODE'
+       ) < min(ordinality) filter (
+         where statement =
+           'SELECT PRIVATE.RECONCILE_BOARD_IMAGE_ATTACHMENTS()'
+       )
+       and min(ordinality) filter (
+         where statement =
+           'SELECT PRIVATE.RECONCILE_BOARD_IMAGE_ATTACHMENTS()'
+       ) < min(ordinality) filter (where statement = 'COMMIT'),
+       false
+     )
+     from migration_statements $$,
+  array[true],
+  'migration transaction locks legacy writes before reconciliation'
 );
 
 select results_eq(

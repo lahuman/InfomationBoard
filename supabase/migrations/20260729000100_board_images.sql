@@ -1,3 +1,5 @@
+begin;
+
 insert into storage.buckets (
   id,
   name,
@@ -21,6 +23,8 @@ revoke update on public.profiles from authenticated;
 grant update (display_name) on public.profiles to authenticated;
 revoke insert, update, delete on public.attachments from authenticated;
 grant select on public.attachments to authenticated;
+
+lock table public.attachments in share row exclusive mode;
 
 create function private.reconcile_board_image_attachments()
 returns void
@@ -416,3 +420,5 @@ grant execute on function public.cancel_board_image(uuid)
 to authenticated;
 grant execute on function public.delete_board_image_record(uuid)
 to authenticated;
+
+commit;
