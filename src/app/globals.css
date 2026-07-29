@@ -1,4 +1,6 @@
 @import "tailwindcss";
+@import "@milkdown/kit/prose/view/style/prosemirror.css";
+@import "@milkdown/kit/prose/tables/style/tables.css";
 
 :root {
   color-scheme: light;
@@ -18,6 +20,138 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: Arial, Helvetica, sans-serif;
+}
+
+.markdown-content-editor {
+  margin-top: 0.5rem;
+  border: 1px solid var(--foreground);
+  background: #fffdf7;
+}
+
+.markdown-editor-header,
+.markdown-mode-tabs,
+.markdown-toolbar,
+.markdown-link-form {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.markdown-editor-header {
+  justify-content: space-between;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--foreground);
+  background: var(--background);
+}
+
+.markdown-mode-tabs,
+.markdown-toolbar {
+  flex-wrap: wrap;
+}
+
+.markdown-mode-tabs button,
+.markdown-toolbar button,
+.markdown-link-form button {
+  min-height: 2.35rem;
+  border: 1px solid var(--foreground);
+  border-radius: 0;
+  background: #fffdf7;
+  color: var(--foreground);
+  font: inherit;
+  font-size: 0.85rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.markdown-mode-tabs button[aria-selected="true"],
+.markdown-toolbar button[aria-pressed="true"] {
+  background: var(--foreground);
+  color: var(--background);
+}
+
+.markdown-mode-tabs button:disabled,
+.markdown-toolbar button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.markdown-link-form {
+  flex-wrap: wrap;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--foreground);
+}
+
+.markdown-link-form label {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.markdown-link-form input,
+.markdown-source-input {
+  border: 1px solid var(--foreground);
+  border-radius: 0;
+  background: #fffdf7;
+  color: var(--foreground);
+  font: inherit;
+}
+
+.markdown-rich-surface {
+  min-height: 20rem;
+  padding: 0.9rem 1rem;
+}
+
+.markdown-rich-surface .ProseMirror {
+  min-height: 18rem;
+  outline: 0;
+  font-family: Arial, Helvetica, sans-serif;
+  line-height: 1.6;
+}
+
+.markdown-rich-surface .ProseMirror ul,
+.markdown-rich-surface .ProseMirror ol {
+  padding-left: 1.5rem;
+}
+
+.markdown-source-input {
+  display: block;
+  width: 100%;
+  min-height: 20rem;
+  padding: 0.9rem 1rem;
+  resize: vertical;
+}
+
+.markdown-content-editor [role="tabpanel"] > label,
+.markdown-content-editor [role="tabpanel"] > p {
+  display: block;
+  margin: 0.75rem 0.9rem;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.markdown-content-editor [role="tabpanel"] > .markdown-source-input {
+  width: calc(100% - 1.8rem);
+  margin: 0 0.9rem;
+}
+
+.markdown-editor-error {
+  margin: 0;
+  padding: 0.75rem;
+  border-bottom: 1px solid var(--foreground);
+  background: #ffe0d7;
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+.markdown-mode-tabs button:focus-visible,
+.markdown-toolbar button:focus-visible,
+.markdown-link-form button:focus-visible,
+.markdown-link-form input:focus-visible,
+.markdown-source-input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
 }
 
 a {
