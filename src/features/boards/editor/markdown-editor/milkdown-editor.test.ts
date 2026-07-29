@@ -1,5 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createMilkdownEditorController } from "./milkdown-editor";
+import {
+  __testing,
+  createMilkdownEditorController,
+} from "./milkdown-editor";
 
 const sample = `## 일정
 
@@ -17,6 +20,23 @@ const sample = `## 일정
 
 describe("createMilkdownEditorController", () => {
   const controllers: Array<{ destroy(): Promise<void> }> = [];
+
+  async function setup(
+    markdown: string,
+    options: Partial<Parameters<typeof createMilkdownEditorController>[0]> = {},
+  ) {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const controller = await createMilkdownEditorController({
+      root,
+      markdown,
+      onMarkdownChange: vi.fn(),
+      onToolbarStateChange: vi.fn(),
+      ...options,
+    });
+    controllers.push(controller);
+    return { controller, root };
+  }
 
   afterEach(async () => {
     await Promise.all(controllers.splice(0).map((item) => item.destroy()));
@@ -94,5 +114,56 @@ describe("createMilkdownEditorController", () => {
     expect(root.querySelector('img[src="x"]')).not.toBeInTheDocument();
     expect(root.querySelector("board-widget")).not.toBeInTheDocument();
     expect(globalThis).not.toHaveProperty("milkdownXss");
+  });
+
+  it("runs the agreed heading, emphasis, list, rule, undo, and redo commands", async () => {
+    const { controller, root } = await setup("선택할 문장");
+    __testing.selectText(controller, 1, 7);
+
+    expect(controller.run("bold")).toBe(true);
+    expect(controller.getMarkdown()).toContain("**선택할 문장**");
+    expect(controller.run("undo")).toBe(true);
+    expect(controller.getMarkdown()).toBe("선택할 문장");
+    expect(controller.run("redo")).toBe(true);
+    expect(root.querySelector("strong")).toBeInTheDocument();
+
+    controller.run("heading-2");
+    expect(root.querySelector("h2")).toBeInTheDocument();
+    expect(root.querySelector("h2")).toHaveTextContent("선택할 문장");
+    controller.run("horizontal-rule");
+    expect(controller.getMarkdown()).toContain("---");
+  });
+
+  it("rejects unsafe links and accepts safe links", async () => {
+    const { controller } = await setup("원주 책방 틈");
+    __testing.selectText(controller, 1, 8);
+
+    expect(controller.run("link", { href: "javascript:alert(1)" })).toBe(
+      false,
+    );
+    expect(controller.getMarkdown()).not.toContain("javascript:");
+    expect(controller.run("link", { href: "https://example.com" })).toBe(
+      true,
+    );
+    expect(controller.getMarkdown()).toContain(
+      "[원주 책방 틈](https://example.com)",
+    );
+  });
+
+  it("does not re-emit an externally replaced Markdown value", async () => {
+    const onMarkdownChange = vi.fn();
+    const { controller } = await setup("처음", { onMarkdownChange });
+    controller.replaceMarkdown("## 서버 복구본");
+
+    expect(controller.getMarkdown()).toBe("## 서버 복구본");
+    expect(onMarkdownChange).not.toHaveBeenCalled();
+  });
+
+  it("round-trips GFM tables and strikethrough", async () => {
+    const markdown =
+      "~~마감~~\n\n| 시간 | 내용 |\n| --- | --- |\n| 14:00 | 시작 |";
+    const { controller } = await setup(markdown);
+    expect(controller.getMarkdown()).toContain("~~마감~~");
+    expect(controller.getMarkdown()).toContain("| 시간 | 내용 |");
   });
 });
