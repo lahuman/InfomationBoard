@@ -6,6 +6,7 @@ const ownerId = "10000000-0000-4000-8000-000000000001";
 const boardId = "20000000-0000-4000-8000-000000000002";
 
 const mocks = vi.hoisted(() => ({
+  cleanupExpiredBoardImages: vi.fn(),
   from: vi.fn(),
   attachmentsSelect: vi.fn(),
   attachmentsOwnerEq: vi.fn(),
@@ -23,8 +24,13 @@ vi.mock("@/lib/supabase/server", () => ({
   createServerSupabaseClient: vi.fn(async () => ({ from: mocks.from })),
 }));
 
+vi.mock("./storage", () => ({
+  cleanupExpiredBoardImages: mocks.cleanupExpiredBoardImages,
+}));
+
 beforeEach(() => {
   vi.clearAllMocks();
+  mocks.cleanupExpiredBoardImages.mockResolvedValue({ ok: true });
 
   mocks.attachmentsSelect.mockReturnValue({ eq: mocks.attachmentsOwnerEq });
   mocks.attachmentsOwnerEq.mockReturnValue({ eq: mocks.attachmentsBoardEq });
@@ -74,6 +80,10 @@ describe("getBoardImageLibrary", () => {
     });
 
     expect(mocks.from).toHaveBeenCalledWith("attachments");
+    expect(mocks.cleanupExpiredBoardImages).toHaveBeenCalledWith(
+      ownerId,
+      expect.objectContaining({ from: mocks.from }),
+    );
     expect(mocks.attachmentsSelect).toHaveBeenCalledWith(
       "id, original_filename, mime_type, size_bytes, state",
     );
@@ -86,6 +96,16 @@ describe("getBoardImageLibrary", () => {
     expect(mocks.from).toHaveBeenCalledWith("profiles");
     expect(mocks.profileSelect).toHaveBeenCalledWith("storage_bytes");
     expect(mocks.profileEq).toHaveBeenCalledWith("id", ownerId);
+  });
+
+  it("fails closed without loading the library when expired cleanup fails", async () => {
+    mocks.cleanupExpiredBoardImages.mockResolvedValueOnce({ ok: false });
+
+    await expect(
+      getBoardImageLibrary(ownerId, boardId, "summer-market"),
+    ).resolves.toBeNull();
+
+    expect(mocks.from).not.toHaveBeenCalled();
   });
 
   it("returns null without querying when owner, board, or slug inputs are invalid", async () => {

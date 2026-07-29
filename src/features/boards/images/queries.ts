@@ -7,6 +7,7 @@ import {
   type BoardImageLibrary,
   boardImageUrl,
 } from "./model";
+import { cleanupExpiredBoardImages } from "./storage";
 
 const imageLibraryInputSchema = z.object({
   ownerId: z.uuid(),
@@ -45,6 +46,12 @@ export async function getBoardImageLibrary(
 
   try {
     const supabase = await createServerSupabaseClient();
+    const cleanup = await cleanupExpiredBoardImages(
+      input.data.ownerId,
+      supabase,
+    );
+    if (!cleanup.ok) return null;
+
     const [attachmentsResult, profileResult] = await Promise.all([
       supabase
         .from("attachments")
