@@ -1,7 +1,7 @@
 # Rich Editor and Preview Style Parity Design
 
 Date: 2026-07-29
-Status: Approved in conversation; awaiting written-spec review
+Status: Approved
 
 ## Context
 
