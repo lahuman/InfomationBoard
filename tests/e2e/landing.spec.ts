@@ -7,12 +7,15 @@ function contrastRatio(foreground: string, background: string) {
       throw new Error(`Unsupported CSS color: ${color}`);
     }
 
-    const [red, green, blue] = channels.map((channel) => {
+    const linearChannels = channels.map((channel) => {
       const normalized = channel / 255;
       return normalized <= 0.04045
         ? normalized / 12.92
         : ((normalized + 0.055) / 1.055) ** 2.4;
     });
+    const red = linearChannels[0]!;
+    const green = linearChannels[1]!;
+    const blue = linearChannels[2]!;
 
     return 0.2126 * red + 0.7152 * green + 0.0722 * blue;
   };
