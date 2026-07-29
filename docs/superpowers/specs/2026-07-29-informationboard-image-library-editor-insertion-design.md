@@ -1,7 +1,7 @@
 # InformationBoard Image Library and Editor Insertion Design
 
 Date: 2026-07-29
-Status: Approved in conversation; awaiting written-spec review
+Status: Approved
 
 ## 1. Goal
 
@@ -169,10 +169,12 @@ at the current selection with an attachment URL and alt text. The editor image
 button itself opens the image panel; choosing `삽입` invokes the controller
 operation and returns focus to the document.
 
-The stable source URL is `/images/<attachment-id>`. The default alt text is the
-original filename without its final extension, and the owner can edit the alt
-text before insertion. Empty alt text is allowed only when the owner explicitly
-marks the image decorative.
+The stable source URL is `/b/<board-slug>/images/<attachment-id>`. Keeping the
+route under `/b/<board-slug>` ensures the board-scoped password access cookie is
+sent with image requests. The default alt text is the original filename without
+its final extension, and the owner can edit the alt text before insertion.
+Empty alt text is allowed only when the owner explicitly marks the image
+decorative.
 
 Insertion respects the existing maximum Markdown length. If the generated
 Markdown would exceed that limit, the document is unchanged and the editor
@@ -186,10 +188,12 @@ HTTP(S) images; unsafe protocols remain rejected.
 
 ## 8. Image Delivery and Access Control
 
-`GET /images/<attachment-id>` resolves only a ready attachment. The handler
-loads the parent board and applies these decisions:
+`GET /b/<board-slug>/images/<attachment-id>` resolves only a ready attachment
+belonging to that exact board slug. The handler loads the parent board and
+applies these decisions:
 
-- the authenticated owner can view images on their own board in any state;
+- the authenticated owner can view ready images on their own board in any
+  board lifecycle state;
 - anonymous visitors can view images only when the parent board is published
   and public;
 - a published password board requires the same valid scoped access cookie as
