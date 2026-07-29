@@ -116,6 +116,7 @@ body {
 }
 
 .markdown-rich-surface {
+  --preview-accent: var(--accent);
   min-height: 20rem;
   padding: 0;
 }
@@ -131,8 +132,37 @@ body {
   line-height: 1.6;
 }
 
+.markdown-rich-surface .ProseMirror > :first-child {
+  margin-top: 0;
+}
+
+.markdown-rich-surface .ProseMirror h1,
+.markdown-rich-surface .ProseMirror h2,
+.markdown-rich-surface .ProseMirror h3,
+.markdown-rich-surface .ProseMirror h4 {
+  margin: 2rem 0 0.75rem;
+  line-height: 1.15;
+}
+
+.markdown-rich-surface .ProseMirror h2 {
+  margin: 2.4rem 0 0.8rem;
+  font-size: clamp(1.45rem, 3vw, 2rem);
+}
+
+.markdown-rich-surface .ProseMirror h3 {
+  margin: 1.8rem 0 0.65rem;
+  font-size: clamp(1.15rem, 2.2vw, 1.45rem);
+}
+
+.markdown-rich-surface .ProseMirror a {
+  color: color-mix(in srgb, var(--preview-accent) 75%, #000);
+  font-weight: 800;
+  text-underline-offset: 0.2rem;
+}
+
 .markdown-rich-surface .ProseMirror ul,
 .markdown-rich-surface .ProseMirror ol {
+  margin: 0.75rem 0 1.25rem;
   padding-inline-start: 1.5rem;
 }
 
@@ -144,6 +174,44 @@ body {
 .markdown-rich-surface .ProseMirror ol,
 .board-markdown-list-ordered {
   list-style-type: decimal;
+}
+
+.markdown-rich-surface .ProseMirror li + li {
+  margin-top: 0.35rem;
+}
+
+.markdown-rich-surface .ProseMirror hr {
+  margin: 2.5rem 0;
+  border: 0;
+  border-top: 1px solid var(--foreground);
+}
+
+.markdown-rich-surface .ProseMirror blockquote {
+  margin-inline: 0;
+  padding-left: 1rem;
+  border-left: 0.35rem solid var(--preview-accent);
+}
+
+.markdown-rich-surface .ProseMirror pre,
+.markdown-rich-surface .ProseMirror code {
+  background: color-mix(in srgb, var(--foreground) 8%, transparent);
+}
+
+.markdown-rich-surface .ProseMirror pre {
+  padding: 1rem;
+  overflow-x: auto;
+  text-align: left;
+}
+
+.markdown-rich-surface .ProseMirror table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.markdown-rich-surface .ProseMirror th,
+.markdown-rich-surface .ProseMirror td {
+  padding: 0.6rem;
+  border: 1px solid var(--foreground);
 }
 
 .markdown-source-input {
