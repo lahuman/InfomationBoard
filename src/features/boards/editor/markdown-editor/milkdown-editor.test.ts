@@ -67,7 +67,11 @@ describe("createMilkdownEditorController", () => {
     });
     controllers.push(controller);
 
-    expect(controller.getMarkdown()).toContain("~~취소됨~~");
+    const markdown = controller.getMarkdown();
+
+    expect(markdown).toMatch(/^\| 상태\s+\| 내용\s+\|$/m);
+    expect(markdown).toMatch(/^\| -+\s+\| -+\s+\|$/m);
+    expect(markdown).toMatch(/^\| 완료\s+\| ~~취소됨~~\s+\|$/m);
     expect(root.querySelector("table")).toBeInTheDocument();
     expect(root.querySelector("del")).toHaveTextContent("취소됨");
   });
