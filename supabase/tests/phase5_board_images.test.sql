@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(79);
+select plan(102);
 
 select has_function(
   'public',
@@ -46,9 +46,119 @@ select ok(
 );
 select has_function(
   'public',
-  'delete_board_image_record',
+  'claim_board_image_deletion',
+  array['uuid', 'uuid', 'bigint'],
+  'ready image deletion starts at an authenticated claim boundary'
+);
+select has_function(
+  'public',
+  'complete_board_image_deletion',
+  array['uuid', 'uuid', 'uuid'],
+  'claimed ready image deletion has an explicit completion boundary'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.claim_board_image_deletion(uuid,uuid,bigint)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.complete_board_image_deletion(uuid,uuid,uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_board_image_deletion(uuid,uuid,uuid)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.complete_board_image_deletion(uuid,uuid,uuid)',
+    'EXECUTE'
+  ),
+  'only service_role can complete a claimed ready image deletion'
+);
+select ok(
+  to_regprocedure('public.delete_board_image_record(uuid)') is null,
+  'the direct metadata deletion RPC is removed'
+);
+select has_function(
+  'public',
+  'claim_board_deletion',
   array['uuid'],
-  'ready image deletion uses an authenticated RPC boundary'
+  'board deletion starts at an authenticated claim boundary'
+);
+select has_function(
+  'public',
+  'complete_board_deletion',
+  array['uuid', 'uuid'],
+  'claimed board deletion has an explicit completion boundary'
+);
+select ok(
+  position(
+    'FOR UPDATE' in upper(
+      pg_get_functiondef(
+        'public.claim_board_deletion(uuid)'::regprocedure
+      )
+    )
+  ) > 0,
+  'board deletion claims take a lock that conflicts with upload KEY SHARE'
+);
+select ok(
+  has_function_privilege(
+    'authenticated',
+    'public.claim_board_deletion(uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'public.complete_board_deletion(uuid,uuid)',
+    'EXECUTE'
+  )
+  and has_function_privilege(
+    'service_role',
+    'public.complete_board_deletion(uuid,uuid)',
+    'EXECUTE'
+  ),
+  'only service_role can complete a claimed board deletion'
+);
+select ok(
+  not has_table_privilege('authenticated', 'public.boards', 'DELETE'),
+  'authenticated users cannot bypass board Storage cleanup'
+);
+select ok(
+  not has_column_privilege(
+    'authenticated',
+    'public.boards',
+    'deletion_started_at',
+    'UPDATE'
+  ),
+  'authenticated users cannot forge or clear a board deletion claim'
+);
+select ok(
+  position(
+    'DELETION_STARTED_AT IS NULL' in upper(
+      pg_get_functiondef(
+        'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure
+      )
+    )
+  ) > 0,
+  'reservation excludes a board already claimed for deletion'
+);
+select ok(
+  (
+    select
+      position('FOR KEY SHARE' in upper(with_check)) > 0
+      and position(
+        'DELETION_STARTED_AT IS NULL' in upper(with_check)
+      ) > 0
+    from pg_policies
+    where schemaname = 'storage'
+      and tablename = 'objects'
+      and policyname = 'board_image_reserved_insert'
+  ),
+  'Storage INSERT locks and excludes a board claimed for deletion'
 );
 select ok(
   position(
@@ -454,10 +564,86 @@ select results_eq(
   array[20::bigint],
   'all twenty reservations count toward storage'
 );
-select lives_ok(
+select results_eq(
+  $$ select claimed.id
+     from public.claim_board_deletion(
+       '30000000-0000-4000-8000-000000000004'
+     ) as claimed $$,
+  array['30000000-0000-4000-8000-000000000004'::uuid],
+  'an owner claims a board before deleting its objects'
+);
+select results_eq(
+  $$ select deletion_started_at is not null
+     from public.boards
+     where id = '30000000-0000-4000-8000-000000000004' $$,
+  array[true],
+  'the board claim persists while object cleanup is pending'
+);
+select results_eq(
+  $$ with changed as (
+       update public.boards
+       set
+         status = 'published',
+         visibility = 'public',
+         published_at = now()
+       where id = '30000000-0000-4000-8000-000000000004'
+       returning 1
+     )
+     select count(*)::bigint from changed $$,
+  array[0::bigint],
+  'an authenticated update cannot republish a claimed board'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from public.publish_board_with_password(
+       '30000000-0000-4000-8000-000000000004',
+       (
+         select revision
+         from public.boards
+         where id = '30000000-0000-4000-8000-000000000004'
+       ),
+       '$argon2id$v=19$m=19456,t=2,p=1$c2FsdHNhbHQ$AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA'
+     ) $$,
+  array[0::bigint],
+  'password publication cannot republish a claimed board'
+);
+select throws_ok(
+  $$ select * from public.reserve_board_image(
+       '30000000-0000-4000-8000-000000000004',
+       'late.png', 'image/png', 1
+     ) $$,
+  'P0001', 'image_not_found',
+  'a board deletion claim closes later reservations'
+);
+select throws_ok(
   $$ delete from public.boards
      where id = '30000000-0000-4000-8000-000000000004' $$,
-  'an owner deletes a board with reserved images'
+  '42501', null,
+  'an authenticated owner cannot bypass board object cleanup'
+);
+select throws_ok(
+  $$ select public.complete_board_deletion(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000004'
+     ) $$,
+  '42501', null,
+  'an authenticated owner cannot complete claimed board deletion'
+);
+reset role;
+set local role service_role;
+select lives_ok(
+  $$ select public.complete_board_deletion(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000004'
+     ) $$,
+  'service role completes board deletion after server object cleanup'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
@@ -585,10 +771,17 @@ select results_eq(
   array[52428800::bigint],
   'a rejected size growth leaves storage accounting unchanged'
 );
+reset role;
 select lives_ok(
   $$ delete from public.boards
      where id = '30000000-0000-4000-8000-000000000005' $$,
-  'the size-growth fixture can be cascade deleted'
+  'the size-growth fixture is removed by trusted test cleanup'
+);
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
@@ -670,25 +863,112 @@ select throws_ok(
   '42501', null,
   'authenticated uploads are denied after finalization'
 );
+select throws_ok(
+  $$ select * from public.claim_board_image_deletion(
+       (
+         select board_id from public.attachments
+         where original_filename = 'ready.webp'
+       ),
+       (
+         select id from public.attachments
+         where original_filename = 'ready.webp'
+       ),
+       (
+         select revision - 1 from public.boards
+         where id = '30000000-0000-4000-8000-000000000003'
+       )
+     ) $$,
+  'P0001', 'image_board_changed',
+  'ready image deletion rejects a stale saved-board revision'
+);
+select throws_ok(
+  $$ select * from public.claim_board_image_deletion(
+       (
+         select board_id from public.attachments
+         where original_filename = 'ready.webp'
+       ),
+       (
+         select id from public.attachments
+         where original_filename = 'ready.webp'
+       ),
+       null
+     ) $$,
+  'P0001', 'image_board_changed',
+  'ready image deletion cannot bypass the revision fence with null'
+);
 select results_eq(
-  $$ select public.delete_board_image_record(id)
+  $$ select claimed.state
+     from public.attachments
+     cross join lateral public.claim_board_image_deletion(
+       attachments.board_id,
+       attachments.id,
+       (
+         select revision
+         from public.boards
+         where boards.id = attachments.board_id
+       )
+     ) as claimed
+     where attachments.original_filename = 'ready.webp' $$,
+  array['deleting'::text],
+  'an owner atomically claims a ready image for deletion'
+);
+select results_eq(
+  $$ select storage_bytes from public.profiles
+     where id = '10000000-0000-4000-8000-000000000001' $$,
+  array[2048::bigint],
+  'a deleting ready image remains charged until trusted completion'
+);
+select throws_ok(
+  $$ select public.complete_board_image_deletion(owner_id, board_id, id)
      from public.attachments
      where original_filename = 'ready.webp' $$,
-  array[true],
-  'an owner deletes a ready image record'
+  '42501', null,
+  'an authenticated owner cannot complete ready image deletion directly'
+);
+select set_config(
+  'test.ready_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'ready.webp'
+  ),
+  true
+);
+reset role;
+set local role service_role;
+select lives_ok(
+  $$ select public.complete_board_image_deletion(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.ready_attachment_id')::uuid
+     ) $$,
+  'service role completes a server-verified ready image deletion'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
      where id = '10000000-0000-4000-8000-000000000001' $$,
   array[0::bigint],
-  'deleting a ready image releases its bytes'
+  'trusted ready image deletion releases its bytes'
 );
-select results_eq(
-  $$ select public.delete_board_image_record(
-       '30000000-0000-4000-8000-000000000099'
+select throws_ok(
+  $$ select * from public.claim_board_image_deletion(
+       '30000000-0000-4000-8000-000000000003',
+       '30000000-0000-4000-8000-000000000099',
+       (
+         select revision
+         from public.boards
+         where id = '30000000-0000-4000-8000-000000000003'
+       )
      ) $$,
-  array[false],
-  'deleting an absent ready image reports false'
+  'P0001', 'image_not_found',
+  'claiming an absent ready image returns the generic lifecycle error'
 );
 
 select throws_ok(
@@ -878,10 +1158,25 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
-    'public.delete_board_image_record(uuid)',
+    'public.claim_board_image_deletion(uuid,uuid,bigint)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_board_image_deletion(uuid,uuid,uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.claim_board_deletion(uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_board_deletion(uuid,uuid)',
     'EXECUTE'
   ),
-  'anonymous users cannot execute image lifecycle RPCs'
+  'anonymous users cannot execute image or board deletion lifecycle RPCs'
 );
 
 select * from finish();

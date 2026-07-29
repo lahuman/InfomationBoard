@@ -290,8 +290,20 @@ describe("cleanupExpiredBoardImages", () => {
     const cancellingPath = `${ownerId}/${boardId}/${cancellingId}`;
     mocks.candidatesOr.mockResolvedValue({
       data: [
-        { id: attachmentId, board_id: boardId },
-        { id: cancellingId, board_id: boardId },
+        {
+          id: attachmentId,
+          board_id: boardId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "reserved",
+        },
+        {
+          id: cancellingId,
+          board_id: boardId,
+          owner_id: ownerId,
+          storage_path: cancellingPath,
+          state: "cancelling",
+        },
       ],
       error: null,
     });
@@ -315,10 +327,62 @@ describe("cleanupExpiredBoardImages", () => {
     ).resolves.toEqual({ ok: true });
 
     expect(mocks.candidatesOr).toHaveBeenCalledWith(
-      `state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.2026-07-29T10:00:00.000Z)`,
+      `state.eq.deleting,state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.2026-07-29T10:00:00.000Z)`,
     );
     expect(mocks.remove).toHaveBeenCalledTimes(2);
     expect(rpc).toHaveBeenCalledTimes(2);
     expect(mocks.adminRpc).toHaveBeenCalledTimes(2);
+  });
+
+  it("resumes an invisible deleting row after reload without using authenticated completion", async () => {
+    mocks.candidatesOr.mockResolvedValueOnce({
+      data: [{
+        id: attachmentId,
+        board_id: boardId,
+        owner_id: ownerId,
+        storage_path: storagePath,
+        state: "deleting",
+      }],
+      error: null,
+    });
+    const rpc = vi.fn();
+
+    await expect(
+      cleanupExpiredBoardImages(ownerId, { rpc } as never),
+    ).resolves.toEqual({ ok: true });
+
+    expect(mocks.remove).toHaveBeenCalledWith([storagePath]);
+    expect(rpc).not.toHaveBeenCalled();
+    expect(mocks.adminRpc).toHaveBeenCalledWith(
+      "complete_board_image_deletion",
+      {
+        p_owner_id: ownerId,
+        p_board_id: boardId,
+        p_attachment_id: attachmentId,
+      },
+    );
+  });
+
+  it("keeps an invisible deleting row charged when reload cleanup cannot remove its object", async () => {
+    mocks.candidatesOr.mockResolvedValueOnce({
+      data: [{
+        id: attachmentId,
+        board_id: boardId,
+        owner_id: ownerId,
+        storage_path: storagePath,
+        state: "deleting",
+      }],
+      error: null,
+    });
+    mocks.remove.mockResolvedValueOnce({
+      data: null,
+      error: { name: "StorageApiError", status: 503, message: "Unavailable" },
+    });
+
+    await expect(
+      cleanupExpiredBoardImages(ownerId, { rpc: vi.fn() } as never),
+    ).resolves.toEqual({ ok: false });
+
+    expect(mocks.adminRpc).not.toHaveBeenCalled();
   });
 });

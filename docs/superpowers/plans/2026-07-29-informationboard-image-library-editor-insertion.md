@@ -204,7 +204,7 @@ git commit -m "feat: define image limits and references"
 
 **Interfaces:**
 - Consumes: exact byte, MIME, count, bucket, and expiry constants from Task 1, duplicated as SQL literals at the database trust boundary.
-- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `claim_board_image_cancellation(uuid,uuid)`, service-role-only `complete_board_image_cancellation(uuid,uuid,uuid)`, and `delete_board_image_record(uuid)` plus updated generated TypeScript signatures.
+- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `claim_board_image_cancellation(uuid,uuid)`, and service-role-only `complete_board_image_cancellation(uuid,uuid,uuid)`. Task 5 replaces the original direct ready-row deletion draft with claim/completion RPCs and regenerates the TypeScript signatures.
 
 - [ ] **Step 1: Write failing pgTAP coverage**
 
@@ -290,7 +290,7 @@ reservation_expires_at := now() + interval '15 minutes';
 
 It returns `id`, `storage_path`, `original_filename`, `mime_type`, `size_bytes`, and `reservation_expires_at`. `finalize_board_image` locks the owned reservation, applies verified MIME/actual size, sets `state = 'ready'`, clears expiry, and returns the ready row; if already ready with identical metadata, return it unchanged, and if `cancelling`, raise `image_cancellation_in_progress`.
 
-`claim_board_image_cancellation(board_id, attachment_id)` locks the exact owned row, atomically changes `reserved` to `cancelling`, and idempotently returns its ID, owner ID, and same path when already cancelling. `complete_board_image_cancellation(owner_id, board_id, attachment_id)` deletes only that exact cancelling row after server object removal, releasing quota through the delete trigger. Revoke completion from `public`, `anon`, and `authenticated`, granting it only to `service_role`; grant the user-facing lifecycle RPCs only to `authenticated`. `delete_board_image_record` deletes only an owned ready row and returns whether one row was removed.
+`claim_board_image_cancellation(board_id, attachment_id)` locks the exact owned row, atomically changes `reserved` to `cancelling`, and idempotently returns its ID, owner ID, and same path when already cancelling. `complete_board_image_cancellation(owner_id, board_id, attachment_id)` deletes only that exact cancelling row after server object removal, releasing quota through the delete trigger. Revoke completion from `public`, `anon`, and `authenticated`, granting it only to `service_role`; grant the user-facing lifecycle RPCs only to `authenticated`. Ready-row deletion follows the equivalent Task 5 `ready -> deleting -> trusted completion` boundary; there is no authenticated direct metadata deletion RPC.
 
 - [ ] **Step 5: Regenerate and inspect TypeScript database types**
 
@@ -505,16 +505,24 @@ git commit -m "feat: add verified image upload lifecycle"
 **Files:**
 - Create: `src/features/boards/images/actions/delete-image.ts`
 - Create: `src/features/boards/images/actions/delete-image.test.ts`
+- Create: `supabase/migrations/20260730000100_safe_image_board_deletion.sql`
+- Create: `supabase/tests/phase5_board_deletion_concurrency.test.sql`
 - Modify: `src/features/boards/actions/delete-board.ts`
 - Modify: `src/features/boards/actions/delete-board.test.ts`
+- Modify: `src/features/boards/images/references.ts`
+- Modify: `src/features/boards/images/references.test.ts`
+- Modify: `src/features/boards/images/storage.ts`
+- Modify: `src/features/boards/images/storage.test.ts`
+- Modify: `supabase/tests/phase5_board_images.test.sql`
+- Modify: `src/lib/supabase/database.types.ts`
 
 **Interfaces:**
-- Consumes: `hasBoardImageReference` from Task 1, admin storage removal from Task 4, and `delete_board_image_record` from Task 2.
-- Produces: `deleteBoardImage({boardId, attachmentId})` returning `deleted`, `in_use`, or safe `error`; board deletion with storage cleanup.
+- Consumes: `hasBoardImageReference` from Task 1 and exact missing-object/admin Storage handling from Task 4.
+- Produces: authenticated `claim_board_image_deletion(uuid,uuid,bigint)`, service-role-only `complete_board_image_deletion(uuid,uuid,uuid)`, authenticated `claim_board_deletion(uuid)`, service-role-only `complete_board_deletion(uuid,uuid)`, and `deleteBoardImage({boardId, attachmentId})` returning `deleted`, `in_use`, or safe `error`.
 
 - [ ] **Step 1: Write failing image deletion tests**
 
-Assert invalid IDs fail before auth; foreign/missing images use a generic safe result; only an owned ready row is considered; saved Markdown image nodes block deletion; plain text and links with the same URL do not; storage removal happens before RPC deletion; a missing object is treated idempotently; storage failure retains metadata/quota; and successful deletion returns current `storageBytes`.
+Assert invalid IDs fail before auth; foreign/missing images use a generic safe result; only an owned ready or already-deleting row is considered; saved Markdown image nodes block deletion; plain text and links with the same URL do not; claim precedes Storage removal and service-role completion; a missing object is treated idempotently; storage failure retains deleting metadata/quota; and successful deletion returns current `storageBytes`.
 
 ```ts
 expect(await deleteBoardImage({ boardId, attachmentId })).toEqual({
@@ -527,7 +535,7 @@ expect(rpc).not.toHaveBeenCalled();
 
 - [ ] **Step 2: Extend failing board deletion tests**
 
-Mock owned attachment paths. Assert one batched `storage.from(IMAGE_BUCKET).remove(paths)` call occurs before the existing board delete, no storage call occurs for a board without images, storage failure prevents the database delete, and database failure after object removal remains a safe retryable error.
+Mock server-resolved owned attachment paths. Assert one batched `storage.from(IMAGE_BUCKET).remove(paths)` call occurs after the board claim and before service-role completion, no storage call occurs for a board without images, storage failure preserves the claim and prevents completion, and database failure after object removal remains a safe retryable error.
 
 - [ ] **Step 3: Run focused tests and observe failure**
 
@@ -541,11 +549,36 @@ Expected: FAIL because safe deletion is not implemented.
 
 - [ ] **Step 4: Implement image deletion**
 
-Authenticate, load the owned attachment plus board `slug` and latest `content_markdown`, build the exact stable URL, and parse Markdown with `hasBoardImageReference`. Return `in_use` before touching storage. Otherwise remove the server-resolved path, call `delete_board_image_record`, read the updated profile usage, and revalidate the editor/dashboard/public board paths.
+Authenticate, load the owned ready/deleting attachment plus board `slug`,
+latest `content_markdown`, and `revision`, build the exact stable URL, and parse
+Markdown with `hasBoardImageReference`. Direct and reference-style Markdown
+image nodes block; plain text and ordinary links do not. Return `in_use` before
+touching lifecycle state or Storage. Otherwise call
+`claim_board_image_deletion` with the saved revision. The RPC locks the board,
+rejects a stale or null revision, claims the attachment, and bumps/returns the
+board revision so an already-started autosave cannot commit a stale reference.
+Remove only the claim's server-resolved path, then call
+`complete_board_image_deletion` through the admin client. Every post-claim
+result, including a safe error, carries the new board revision. Read updated
+profile usage and revalidate the editor/dashboard/public board/image paths. A
+failed remove leaves the `deleting` row and quota intact for retry; only the
+exact missing-object response advances completion. Opening a library also
+retries invisible persisted `deleting` rows through server-resolved admin
+removal/completion, so a reload does not strand charged quota.
 
 - [ ] **Step 5: Add storage cleanup to board deletion**
 
-Before deleting the row, select the board scoped to `user.id`, then select all of its attachment `storage_path` values. If the board is missing, preserve the current idempotent `deleted` result. Remove non-empty paths through the admin client and only then perform the owner-scoped board delete. The attachment delete trigger releases quota during cascade.
+Atomically claim the owned board with `deletion_started_at`, then select all attachment `storage_path` values scoped to the returned board and owner. If the board is missing, preserve the idempotent `deleted` result. Remove non-empty paths through the admin client and only then call service-role-only completion; the attachment delete trigger releases quota during cascade.
+
+The claim first takes `FOR UPDATE`, which conflicts with the `FOR KEY SHARE`
+lock taken by `reserve_board_image`. The Storage INSERT policy also takes KEY
+SHARE on the same board row and requires `deletion_started_at is null`.
+Therefore a reservation/upload that wins the race completes before the claim
+and is included in path enumeration, while one that loses cannot create an
+object. A two-session pgTAP test holds the upload-side lock and proves the claim
+hits `lock_timeout`. Revoke direct board DELETE and `deletion_started_at`
+updates from `authenticated`; the board UPDATE policy and password publication
+RPC also exclude claimed rows so deletion is terminal/private.
 
 - [ ] **Step 6: Run focused tests**
 
@@ -554,7 +587,21 @@ Run the Step 3 command. Expected: PASS.
 - [ ] **Step 7: Commit safe deletion**
 
 ```bash
-git add src/features/boards/images/actions/delete-image.ts src/features/boards/images/actions/delete-image.test.ts src/features/boards/actions/delete-board.ts src/features/boards/actions/delete-board.test.ts
+git add \
+  docs/superpowers/plans/2026-07-29-informationboard-image-library-editor-insertion.md \
+  docs/superpowers/specs/2026-07-29-informationboard-image-library-editor-insertion-design.md \
+  src/features/boards/actions/delete-board.ts \
+  src/features/boards/actions/delete-board.test.ts \
+  src/features/boards/images/actions/delete-image.ts \
+  src/features/boards/images/actions/delete-image.test.ts \
+  src/features/boards/images/references.ts \
+  src/features/boards/images/references.test.ts \
+  src/features/boards/images/storage.ts \
+  src/features/boards/images/storage.test.ts \
+  src/lib/supabase/database.types.ts \
+  supabase/migrations/20260730000100_safe_image_board_deletion.sql \
+  supabase/tests/phase5_board_deletion_concurrency.test.sql \
+  supabase/tests/phase5_board_images.test.sql
 git commit -m "feat: safely delete board images"
 ```
 
@@ -773,6 +820,7 @@ type ImageLibraryProps = {
   initialLibrary: BoardImageLibrary;
   contentMarkdown: string;
   onInsert(image: BoardImage, alt: string): boolean;
+  onBoardRevision(revision: number): void;
   uploadImage?: typeof uploadBoardImage;
   reserveImageAction: typeof reserveBoardImage;
   finalizeImageAction: typeof finalizeBoardImage;
@@ -782,6 +830,9 @@ type ImageLibraryProps = {
 ```
 
 Own local `images`, `storageBytes`, selected file, per-image alt text/decorative state, pending operation, delete confirmation ID, and one live-region message. Validate before upload, call the coordinator with the injected reserve/finalize/cancel actions, append only a `ready` result, and clear the file input by incrementing an input key. Require non-empty alt text unless decorative is selected. Before deletion, call `hasBoardImageReference(contentMarkdown, image.url)`; otherwise confirm and invoke the server action. Never optimistically remove a row before server success.
+Apply `boardRevision` through `onBoardRevision` on every delete result that
+contains it, including retryable post-claim errors, so the editor's next save
+uses the revision fence returned by the server.
 
 - [ ] **Step 5: Add toolbar/panel integration and page actions**
 

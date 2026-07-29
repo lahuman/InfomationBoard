@@ -224,25 +224,46 @@ this stable route. No reusable Storage URL is issued to the browser.
 ## 9. Safe Deletion and Lifecycle Cleanup
 
 Before deletion, the action authenticates ownership, loads the latest saved
-`content_markdown`, and checks for the exact stable attachment URL in parsed
-Markdown image nodes. Text that merely resembles the URL does not block
-deletion. If referenced, the action returns a specific `in_use` result and does
-not modify storage, metadata, or quota.
+`content_markdown` and board revision, and checks for the exact stable
+attachment URL in parsed Markdown image nodes. Both direct and reference-style
+images count; text and ordinary links that merely contain the URL do not. If
+referenced, the action returns a specific `in_use` result and does not modify
+storage, metadata, or quota.
 
 The editor also checks its current unsaved draft before sending a delete
 request. This closes the autosave window in which a newly inserted local image
 reference is not yet present in the saved board. The server check remains
 authoritative for references saved from any other tab.
 
-For an unused image, the action removes the Storage object first and then
-deletes the attachment row, which releases quota through the database trigger.
-If object removal succeeds but row deletion fails, retry recognizes the missing
-object and completes the metadata cleanup. If object removal fails, the row and
-quota remain intact so the operation can be retried without creating an orphan.
+For an unused image, an authenticated RPC atomically claims
+`ready -> deleting` and returns the exact owned path. The action removes that
+object, then uses the admin client for a service-role-only completion that
+deletes metadata and releases quota. Retrying a `deleting` row resumes the same
+path. Exact object-missing is idempotent; any other removal failure preserves
+the row and charged quota. Image library and delivery queries continue to
+resolve only `ready` rows. Library cleanup separately resumes persisted
+`deleting` rows, including after reload, without exposing them in the list.
 
-Board deletion first enumerates and removes its Storage objects, then deletes
-the board. Cascading attachment deletion releases all associated quota. A
-failed storage cleanup prevents board deletion and returns a retryable error.
+The image claim locks the board, compares a required non-null saved revision,
+and bumps/returns the revision with every post-claim action result. A save that
+won the lock first makes the claim fail stale; a save that lost the lock keeps
+its older optimistic revision and conflicts instead of committing a newly
+referenced deleted image.
+
+Board deletion first claims the owned board with `deletion_started_at`, making
+it private and non-published, then enumerates every server-resolved attachment
+path. After one batched Storage removal, a service-role-only completion deletes
+the board and cascades its attachments. A failed Storage call leaves the claim,
+metadata, and quota retryable. Authenticated users cannot directly delete the
+board or update its claim column.
+
+Reservation already takes a `FOR KEY SHARE` board lock. The board claim first
+takes `FOR UPDATE`, which conflicts with that lock, and the Storage INSERT
+policy takes the same KEY SHARE lock while requiring an unclaimed board. Thus
+an earlier reservation/upload is visible to post-claim path enumeration, while
+later work cannot create an object after enumeration. Claimed boards are also
+excluded from owner UPDATE RLS and password publication, so cleanup failure
+cannot be followed by republishing.
 
 ## 10. Security and Failure Handling
 
@@ -268,6 +289,13 @@ failed storage cleanup prevents board deletion and returns a retryable error.
   is executable only by `service_role`, and is called through the server-only
   admin client. Authenticated and anonymous clients cannot release a claimed
   row or its quota directly.
+- Ready deletion mirrors that boundary with `deleting`: authenticated callers
+  can claim only an exact owned ready/deleting row, while only `service_role`
+  can complete after server-verified object removal. The former authenticated
+  direct metadata deletion RPC does not exist.
+- Board deletion completion is likewise service-role-only. Its persisted claim,
+  reservation lock, and Storage INSERT lock close the path-enumeration race and
+  prevent direct cascade deletion from bypassing object cleanup.
 - Finalization refuses `cancelling` rows, so cleanup and readiness cannot race.
 
 ## 11. Testing and Verification

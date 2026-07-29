@@ -12,7 +12,13 @@ import {
 } from "./model";
 
 const cleanupCandidateSchema = z
-  .object({ id: z.uuid(), board_id: z.uuid() })
+  .object({
+    id: z.uuid(),
+    board_id: z.uuid(),
+    owner_id: z.uuid(),
+    storage_path: z.string().min(1),
+    state: z.enum(["reserved", "cancelling", "deleting"]),
+  })
   .strict();
 
 const cancellationClaimSchema = z
@@ -212,10 +218,10 @@ export async function cleanupExpiredBoardImages(
   try {
     candidatesResult = await createAdminSupabaseClient()
       .from("attachments")
-      .select("id, board_id")
+      .select("id, board_id, owner_id, storage_path, state")
       .eq("owner_id", ownerId)
       .or(
-        `state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.${now.toISOString()})`,
+        `state.eq.deleting,state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.${now.toISOString()})`,
       );
   } catch {
     return { ok: false };
@@ -228,6 +234,47 @@ export async function cleanupExpiredBoardImages(
   if (!candidates.success) return { ok: false };
 
   for (const candidate of candidates.data) {
+    if (candidate.state === "deleting") {
+      let adminClient;
+      let removeResult;
+      try {
+        adminClient = createAdminSupabaseClient();
+        removeResult = await adminClient.storage
+          .from(IMAGE_BUCKET)
+          .remove([candidate.storage_path]);
+      } catch {
+        return { ok: false };
+      }
+
+      if (
+        removeResult.error &&
+        !isMissingStorageObjectError(removeResult.error)
+      ) {
+        return { ok: false };
+      }
+
+      let completeResult;
+      try {
+        completeResult = await adminClient.rpc(
+          "complete_board_image_deletion",
+          {
+            p_owner_id: candidate.owner_id,
+            p_board_id: candidate.board_id,
+            p_attachment_id: candidate.id,
+          },
+        );
+      } catch {
+        return { ok: false };
+      }
+      if (
+        completeResult.error &&
+        applicationErrorMessage(completeResult.error) !== "image_not_found"
+      ) {
+        return { ok: false };
+      }
+      continue;
+    }
+
     const cleanup = await cancelBoardImageReservation(
       candidate.board_id,
       candidate.id,

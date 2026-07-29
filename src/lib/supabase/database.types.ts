@@ -86,6 +86,7 @@ export type Database = {
           allow_indexing: boolean
           content_markdown: string
           created_at: string
+          deletion_started_at: string | null
           id: string
           owner_id: string
           published_at: string | null
@@ -103,6 +104,7 @@ export type Database = {
           allow_indexing?: boolean
           content_markdown?: string
           created_at?: string
+          deletion_started_at?: string | null
           id?: string
           owner_id: string
           published_at?: string | null
@@ -120,6 +122,7 @@ export type Database = {
           allow_indexing?: boolean
           content_markdown?: string
           created_at?: string
+          deletion_started_at?: string | null
           id?: string
           owner_id?: string
           published_at?: string | null
@@ -172,9 +175,31 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      claim_board_deletion: {
+        Args: { p_board_id: string }
+        Returns: {
+          id: string
+          owner_id: string
+          slug: string
+        }[]
+      }
       claim_board_image_cancellation: {
         Args: { p_attachment_id: string; p_board_id: string }
         Returns: {
+          id: string
+          owner_id: string
+          state: string
+          storage_path: string
+        }[]
+      }
+      claim_board_image_deletion: {
+        Args: {
+          p_attachment_id: string
+          p_board_id: string
+          p_board_revision: number
+        }
+        Returns: {
+          board_revision: number
           id: string
           owner_id: string
           state: string
@@ -185,6 +210,10 @@ export type Database = {
         Args: { p_anonymous_key_hash: string; p_board_id: string }
         Returns: undefined
       }
+      complete_board_deletion: {
+        Args: { p_board_id: string; p_owner_id: string }
+        Returns: undefined
+      }
       complete_board_image_cancellation: {
         Args: {
           p_attachment_id: string
@@ -193,9 +222,13 @@ export type Database = {
         }
         Returns: undefined
       }
-      delete_board_image_record: {
-        Args: { p_attachment_id: string }
-        Returns: boolean
+      complete_board_image_deletion: {
+        Args: {
+          p_attachment_id: string
+          p_board_id: string
+          p_owner_id: string
+        }
+        Returns: undefined
       }
       finalize_board_image: {
         Args: {

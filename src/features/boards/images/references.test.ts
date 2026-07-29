@@ -8,6 +8,12 @@ describe("hasBoardImageReference", () => {
     expect(hasBoardImageReference(`![포스터](${url})`, url)).toBe(true);
   });
 
+  it("finds an exact board image URL used by a reference-style image", () => {
+    expect(
+      hasBoardImageReference(`![포스터][hero]\n\n[hero]: ${url}`, url),
+    ).toBe(true);
+  });
+
   it("does not mistake URL text for an image reference", () => {
     expect(hasBoardImageReference(`주소: ${url}`, url)).toBe(false);
   });
