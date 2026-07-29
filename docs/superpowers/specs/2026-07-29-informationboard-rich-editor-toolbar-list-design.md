@@ -21,8 +21,8 @@ Selection-sensitive controls behave as toggles:
 - clicking an active heading 2 or heading 3 control converts the selected
   heading back to a paragraph;
 - clicking active bold or italic removes that mark;
-- clicking the active link control exposes the current inline link controls,
-  from which the link can be removed without deleting its text;
+- clicking the active link control immediately removes the link without
+  deleting its text; clicking it while inactive opens the existing URL form;
 - clicking an active unordered list, ordered list, or blockquote control lifts
   the selected content out of that container;
 - clicking an inactive control applies its existing format.
@@ -44,7 +44,8 @@ commands:
 - list removal lifts selected list items out of the list;
 - blockquote removal lifts the selected blocks out of the quote;
 - mark commands continue using Milkdown's existing mark toggles;
-- link removal continues through the existing URL form's `링크 제거` action.
+- link removal calls the existing empty-payload link toggle directly when the
+  selected link is active; the URL form's `링크 제거` action remains available.
 
 Toolbar state remains the source of truth for `aria-pressed`. A command reports
 `active: true` only when the current selection is inside or carries the
