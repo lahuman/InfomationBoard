@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { within } from "@testing-library/react";
 import {
   __testing,
   createMilkdownEditorController,
@@ -60,6 +61,25 @@ describe("createMilkdownEditorController", () => {
     expect(root.querySelector("h2")).toHaveTextContent("일정");
     expect(root.querySelector("ol")).toBeInTheDocument();
     expect(onMarkdownChange).not.toHaveBeenCalled();
+  });
+
+  it("gives the rich textbox its supplied accessible name and help text", async () => {
+    const label = document.createElement("span");
+    label.id = "board-content-label";
+    label.textContent = "본문";
+    const help = document.createElement("p");
+    help.id = "board-content-rich-help";
+    help.textContent = "서식 도구 또는 Markdown 원문으로 본문을 편집할 수 있습니다.";
+    document.body.append(label, help);
+
+    const { root } = await setup("본문", {
+      ariaLabelledBy: label.id,
+      ariaDescribedBy: help.id,
+    });
+
+    const textbox = within(root).getByRole("textbox", { name: "본문" });
+    expect(textbox).toHaveAccessibleName("본문");
+    expect(textbox).toHaveAccessibleDescription(help.textContent);
   });
 
   it("preserves fenced code that starts with a literal asterisk", async () => {
@@ -134,6 +154,20 @@ describe("createMilkdownEditorController", () => {
     expect(controller.getMarkdown()).toContain("---");
   });
 
+  it.each([
+    ["heading-3", "h3"],
+    ["italic", "em"],
+    ["bullet-list", "ul"],
+    ["ordered-list", "ol"],
+    ["blockquote", "blockquote"],
+  ] as const)("maps %s to the expected Milkdown command", async (command, selector) => {
+    const { controller, root } = await setup("선택할 문장");
+    __testing.selectText(controller, 1, 7);
+
+    expect(controller.run(command)).toBe(true);
+    expect(root.querySelector(selector)).toHaveTextContent("선택할 문장");
+  });
+
   it("rejects unsafe links and accepts safe links", async () => {
     const { controller } = await setup("원주 책방 틈");
     __testing.selectText(controller, 1, 8);
@@ -148,6 +182,17 @@ describe("createMilkdownEditorController", () => {
     expect(controller.getMarkdown()).toContain(
       "[원주 책방 틈](https://example.com)",
     );
+  });
+
+  it("removes a link when the link command has no URL payload", async () => {
+    const { controller, root } = await setup("원주 책방 틈");
+    __testing.selectText(controller, 1, 8);
+    expect(controller.run("link", { href: "/guide" })).toBe(true);
+    expect(root.querySelector("a")).toHaveTextContent("원주 책방 틈");
+
+    expect(controller.run("link")).toBe(true);
+    expect(root.querySelector("a")).not.toBeInTheDocument();
+    expect(controller.getMarkdown()).not.toContain("/guide");
   });
 
   it("does not re-emit an externally replaced Markdown value", async () => {

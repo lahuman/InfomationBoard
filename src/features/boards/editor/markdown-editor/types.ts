@@ -28,6 +28,8 @@ export type MarkdownEditorController = {
 export type CreateMarkdownEditorController = (options: {
   root: HTMLElement;
   markdown: string;
+  ariaLabelledBy?: string;
+  ariaDescribedBy?: string;
   onMarkdownChange(markdown: string): void;
   onToolbarStateChange(state: ToolbarState): void;
 }) => Promise<MarkdownEditorController>;

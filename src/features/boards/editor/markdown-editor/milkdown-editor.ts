@@ -3,6 +3,7 @@ import {
   defaultValueCtx,
   Editor,
   editorViewCtx,
+  editorViewOptionsCtx,
   parserCtx,
   remarkStringifyOptionsCtx,
   rootCtx,
@@ -110,7 +111,14 @@ function toolbarStatesEqual(left: ToolbarState, right: ToolbarState): boolean {
 }
 
 export const createMilkdownEditorController: CreateMarkdownEditorController =
-  async ({ root, markdown, onMarkdownChange, onToolbarStateChange }) => {
+  async ({
+    root,
+    markdown,
+    ariaLabelledBy,
+    ariaDescribedBy,
+    onMarkdownChange,
+    onToolbarStateChange,
+  }) => {
     let lastExternalMarkdown = normalizeMarkdown(markdown);
     let applyingExternalValue = false;
     let currentToolbarState = createDefaultToolbarState();
@@ -121,6 +129,20 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       .config((ctx) => {
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, markdown);
+        ctx.update(editorViewOptionsCtx, (options) => ({
+          ...options,
+          attributes: {
+            ...options.attributes,
+            role: "textbox",
+            "aria-multiline": "true",
+            ...(ariaLabelledBy
+              ? { "aria-labelledby": ariaLabelledBy }
+              : {}),
+            ...(ariaDescribedBy
+              ? { "aria-describedby": ariaDescribedBy }
+              : {}),
+          },
+        }));
         ctx.update(remarkStringifyOptionsCtx, (options) => ({
           ...options,
           bullet: "-" as const,

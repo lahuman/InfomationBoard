@@ -33,6 +33,17 @@ const toolbarItems = [
   ["redo", "다시 실행"],
 ] as const satisfies ReadonlyArray<readonly [MarkdownEditorCommand, string]>;
 
+const selectionSensitiveToolbarCommands = new Set<MarkdownEditorCommand>([
+  "heading-2",
+  "heading-3",
+  "bold",
+  "italic",
+  "link",
+  "bullet-list",
+  "ordered-list",
+  "blockquote",
+]);
+
 const defaultToolbarState: ToolbarState = {
   "heading-2": { active: false, enabled: true },
   "heading-3": { active: false, enabled: true },
@@ -102,6 +113,8 @@ export function MarkdownContentEditor({
     void createController({
       root,
       markdown: latestValueRef.current,
+      ariaLabelledBy: `${id}-label`,
+      ariaDescribedBy: `${id}-rich-help`,
       onMarkdownChange: (nextMarkdown) => {
         if (nextMarkdown.length <= maxLengthRef.current) {
           latestValueRef.current = nextMarkdown;
@@ -214,6 +227,7 @@ export function MarkdownContentEditor({
 
   const richPanelId = `${id}-rich-panel`;
   const sourcePanelId = `${id}-source-panel`;
+  const richEditorHelpId = `${id}-rich-help`;
 
   return (
     <section className="markdown-content-editor" aria-label="본문 편집기">
@@ -247,7 +261,11 @@ export function MarkdownContentEditor({
               const state = toolbarState[command];
               return (
                 <button
-                  aria-pressed={state.active}
+                  aria-pressed={
+                    selectionSensitiveToolbarCommands.has(command)
+                      ? state.active
+                      : undefined
+                  }
                   disabled={!state.enabled}
                   key={command}
                   onClick={() => runToolbarCommand(command)}
@@ -266,8 +284,9 @@ export function MarkdownContentEditor({
           <label>
             URL
             <input
+              inputMode="url"
               onChange={(event) => setLinkUrl(event.currentTarget.value)}
-              type="url"
+              type="text"
               value={linkUrl}
             />
           </label>
@@ -288,6 +307,9 @@ export function MarkdownContentEditor({
         role="tabpanel"
       >
         <div ref={rootRef} />
+        <p id={richEditorHelpId}>
+          서식 도구 또는 Markdown 원문으로 본문을 편집할 수 있습니다.
+        </p>
       </div>
 
       <div

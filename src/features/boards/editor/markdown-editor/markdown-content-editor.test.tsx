@@ -76,7 +76,7 @@ it("switches between rich text and Markdown source without losing edits", async 
   );
 });
 
-it("exposes the agreed toolbar with accessible pressed and disabled states", async () => {
+it("exposes pressed state only for selection-sensitive toolbar commands", async () => {
   const editor = createFakeController({
     ...defaultToolbarState,
     bold: { active: true, enabled: true },
@@ -97,6 +97,15 @@ it("exposes the agreed toolbar with accessible pressed and disabled states", asy
     "true",
   );
   expect(screen.getByRole("button", { name: "다시 실행" })).toBeDisabled();
+  expect(screen.getByRole("button", { name: "구분선" })).not.toHaveAttribute(
+    "aria-pressed",
+  );
+  expect(screen.getByRole("button", { name: "실행 취소" })).not.toHaveAttribute(
+    "aria-pressed",
+  );
+  expect(screen.getByRole("button", { name: "다시 실행" })).not.toHaveAttribute(
+    "aria-pressed",
+  );
 });
 
 it("falls back to source mode when Milkdown initialization fails", async () => {
@@ -270,4 +279,25 @@ it("provides an inline link form and explains rejected URLs", async () => {
   expect(screen.getByRole("alert")).toHaveTextContent(
     "안전한 http, https, mailto 또는 내부 링크를 입력해 주세요.",
   );
+});
+
+it("submits an internal relative link from the inline form", async () => {
+  const editor = createFakeController();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="링크로 만들 문장"
+    />,
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "링크" }));
+  fireEvent.change(screen.getByLabelText("URL"), {
+    target: { value: "/guide" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "적용" }));
+
+  expect(editor.run).toHaveBeenCalledWith("link", { href: "/guide" });
 });
