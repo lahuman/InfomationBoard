@@ -38,8 +38,9 @@ body {
 }
 
 .markdown-editor-header {
+  flex-wrap: wrap;
   justify-content: space-between;
-  padding: 0.75rem;
+  padding: 0.65rem 0.75rem;
   border-bottom: 1px solid var(--foreground);
   background: var(--background);
 }
@@ -50,14 +51,15 @@ body {
 }
 
 .markdown-toolbar {
-  gap: 0.65rem;
+  justify-content: flex-end;
+  gap: 0.55rem;
 }
 
 .markdown-toolbar-group {
   display: flex;
   flex-wrap: nowrap;
-  gap: 0.25rem;
-  padding-inline-end: 0.65rem;
+  gap: 0.15rem;
+  padding-inline-end: 0.55rem;
   border-inline-end: 1px solid var(--line);
 }
 
@@ -67,7 +69,6 @@ body {
 }
 
 .markdown-mode-tabs button,
-.markdown-toolbar button,
 .markdown-link-form button {
   min-height: 2.35rem;
   border: 1px solid var(--foreground);
@@ -80,16 +81,89 @@ body {
   cursor: pointer;
 }
 
-.markdown-mode-tabs button[aria-selected="true"],
-.markdown-toolbar button[aria-pressed="true"] {
+.markdown-toolbar button {
+  position: relative;
+  display: inline-grid;
+  width: 2.25rem;
+  min-width: 2.25rem;
+  height: 2.25rem;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  border-radius: 0.3rem;
+  background: transparent;
+  color: var(--foreground);
+  cursor: pointer;
+}
+
+.markdown-mode-tabs button[aria-selected="true"] {
   background: var(--foreground);
   color: var(--background);
+}
+
+.markdown-toolbar button:hover:not(:disabled) {
+  border-color: var(--line);
+  background: color-mix(in srgb, var(--foreground) 7%, transparent);
+}
+
+.markdown-toolbar button[aria-pressed="true"] {
+  border-color: color-mix(in srgb, var(--accent) 55%, var(--foreground));
+  background: color-mix(in srgb, var(--accent) 20%, #fffdf7);
+  color: color-mix(in srgb, var(--accent) 55%, var(--foreground));
 }
 
 .markdown-mode-tabs button:disabled,
 .markdown-toolbar button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+
+.markdown-toolbar button::after {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 0.4rem);
+  left: 50%;
+  width: max-content;
+  max-width: 10rem;
+  padding: 0.35rem 0.5rem;
+  transform: translateX(-50%) translateY(-0.2rem);
+  border-radius: 0.25rem;
+  background: var(--foreground);
+  color: #fffdf7;
+  content: attr(data-tooltip);
+  font-size: 0.75rem;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: 0;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.markdown-toolbar button:hover:not(:disabled)::after,
+.markdown-toolbar button:focus-visible::after {
+  transform: translateX(-50%) translateY(0);
+  opacity: 1;
+}
+
+.markdown-toolbar-group:first-child button:first-child::after {
+  left: 0;
+  transform: translateY(-0.2rem);
+}
+
+.markdown-toolbar-group:first-child button:first-child:hover::after,
+.markdown-toolbar-group:first-child button:first-child:focus-visible::after {
+  transform: translateY(0);
+}
+
+.markdown-toolbar-group:last-child button:last-child::after {
+  right: 0;
+  left: auto;
+  transform: translateY(-0.2rem);
+}
+
+.markdown-toolbar-group:last-child button:last-child:hover::after,
+.markdown-toolbar-group:last-child button:last-child:focus-visible::after {
+  transform: translateY(0);
 }
 
 .markdown-link-form {
@@ -1944,6 +2018,16 @@ a {
 }
 
 @media (max-width: 42rem) {
+  .markdown-editor-header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .markdown-toolbar {
+    justify-content: flex-start;
+    width: 100%;
+  }
+
   .poster-hero {
     min-height: 38rem;
   }
