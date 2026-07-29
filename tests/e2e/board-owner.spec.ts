@@ -53,10 +53,30 @@ test.describe("authenticated board owner workflow", () => {
       "pre-wrap",
     );
 
+    await page.getByLabel("정렬").selectOption("center");
+    const unorderedList = preview.locator(".board-markdown-list-unordered");
+    const orderedList = preview.locator(".board-markdown-list-ordered");
+    await expect(unorderedList).toHaveCSS("list-style-type", "disc");
+    await expect(orderedList).toHaveCSS("list-style-type", "decimal");
+    await expect(unorderedList).toHaveCSS("text-align", "center");
+    await expect(orderedList).toHaveCSS("text-align", "center");
+
     await page.getByRole("tab", { name: "리치 텍스트" }).click();
     await page.setViewportSize({ width: 375, height: 900 });
     const editorPanel = page.locator(".editor-form-panel");
     const toolbar = editorPanel.locator(".markdown-toolbar");
+    await expect(editorPanel.locator(".ProseMirror ul")).toHaveCSS(
+      "list-style-type",
+      "disc",
+    );
+    await expect(editorPanel.locator(".ProseMirror ol")).toHaveCSS(
+      "list-style-type",
+      "decimal",
+    );
+    await expect(editorPanel.locator(".markdown-editor-help")).toHaveCSS(
+      "border-top-width",
+      "1px",
+    );
     const [toolbarBox, editorPanelBox] = await Promise.all([
       toolbar.boundingBox(),
       editorPanel.boundingBox(),

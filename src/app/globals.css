@@ -133,7 +133,17 @@ body {
 
 .markdown-rich-surface .ProseMirror ul,
 .markdown-rich-surface .ProseMirror ol {
-  padding-left: 1.5rem;
+  padding-inline-start: 1.5rem;
+}
+
+.markdown-rich-surface .ProseMirror ul,
+.board-markdown-list-unordered {
+  list-style-type: disc;
+}
+
+.markdown-rich-surface .ProseMirror ol,
+.board-markdown-list-ordered {
+  list-style-type: decimal;
 }
 
 .markdown-source-input {
@@ -1462,7 +1472,24 @@ a {
 .board-markdown ol {
   margin: 0.75rem 0 1.25rem;
   padding-inline-start: 1.5rem;
-  text-align: start;
+}
+
+.align-center .board-markdown > ul,
+.align-center .board-markdown > ol {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
+  text-align: center;
+  list-style-position: inside;
+}
+
+.align-center .board-markdown > ul ul,
+.align-center .board-markdown > ul ol,
+.align-center .board-markdown > ol ul,
+.align-center .board-markdown > ol ol {
+  width: fit-content;
+  max-width: 100%;
+  margin-inline: auto;
 }
 
 .board-markdown li + li {

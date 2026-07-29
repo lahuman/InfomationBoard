@@ -44,6 +44,16 @@ const BOARD_SANITIZE_SCHEMA = {
 };
 
 const BOARD_MARKDOWN_COMPONENTS: Components = {
+  ul({ children }) {
+    return <ul className="board-markdown-list-unordered">{children}</ul>;
+  },
+  ol({ children, start }) {
+    return (
+      <ol className="board-markdown-list-ordered" start={start}>
+        {children}
+      </ol>
+    );
+  },
   a({ children, href }) {
     const safeHref = sanitizeBoardUrl(href ?? "");
     if (!safeHref) return <span>{children}</span>;

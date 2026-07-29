@@ -93,6 +93,17 @@ describe("BoardMarkdown", () => {
     );
   });
 
+  it("distinguishes unordered and ordered lists for marker styling", () => {
+    render(<BoardMarkdown markdown={"- 글머리\n\n1. 번호"} />);
+
+    expect(screen.getAllByRole("list")[0]).toHaveClass(
+      "board-markdown-list-unordered",
+    );
+    expect(screen.getAllByRole("list")[1]).toHaveClass(
+      "board-markdown-list-ordered",
+    );
+  });
+
   it("adds a decorative indicator only to external links", () => {
     const { container } = render(
       <BoardMarkdown
