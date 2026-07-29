@@ -56,6 +56,11 @@ const BOARD_MARKDOWN_COMPONENTS: Components = {
         target={external ? "_blank" : undefined}
       >
         {children}
+        {external ? (
+          <span aria-hidden="true" className="external-link-indicator">
+            ↗
+          </span>
+        ) : null}
       </a>
     );
   },
@@ -88,4 +93,3 @@ export function BoardMarkdown({
     </div>
   );
 }
-

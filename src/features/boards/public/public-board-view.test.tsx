@@ -6,7 +6,7 @@ const board = {
   id: "30000000-0000-4000-8000-000000000003",
   slug: "summer-night-market",
   title: "여름 야시장",
-  summary: "한여름 밤의 먹거리와 공연을 만나보세요.",
+  summary: "첫째 줄\n둘째 줄",
   contentMarkdown:
     "## 운영 시간\n\n금요일 오후 6시\n\n<script>alert('x')</script>",
   template: "event" as const,
@@ -28,7 +28,10 @@ describe("PublicBoardView", () => {
       screen.getByRole("heading", { name: "여름 야시장", level: 1 }),
     ).toBeVisible();
     expect(screen.getByText("행사 안내")).toBeVisible();
-    expect(screen.getByText(board.summary)).toBeVisible();
+    expect(screen.getByTestId("public-board-summary").textContent).toBe(
+      board.summary,
+    );
+    expect(screen.getByTestId("public-board-summary").tagName).toBe("P");
     expect(
       screen.getByRole("heading", { name: "운영 시간", level: 2 }),
     ).toBeVisible();

@@ -333,6 +333,7 @@ it("renders edit and preview tabs with the safe Markdown preview", () => {
       {...publicationProps}
       board={{
         ...initialBoard,
+        summary: "첫째 줄\n둘째 줄",
         contentMarkdown: "<script>alert(1)</script>\n\n# 안전한 안내",
       }}
       deleteBoardAction={vi.fn()}
@@ -346,6 +347,9 @@ it("renders edit and preview tabs with the safe Markdown preview", () => {
   );
   expect(screen.getByRole("tab", { name: "미리보기" })).toBeVisible();
   expect(screen.getByRole("heading", { name: "안전한 안내" })).toBeVisible();
+  expect(document.querySelector(".preview-summary")?.textContent).toBe(
+    "첫째 줄\n둘째 줄",
+  );
   expect(document.querySelector("script")).toBeNull();
 });
 
