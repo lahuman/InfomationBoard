@@ -1474,6 +1474,16 @@ a {
   padding-inline-start: 1.5rem;
 }
 
+.board-markdown li > p:first-child {
+  display: inline;
+  margin: 0;
+}
+
+.board-markdown li > ul,
+.board-markdown li > ol {
+  margin-block: 0.35rem;
+}
+
 .align-center .board-markdown > ul,
 .align-center .board-markdown > ol {
   width: fit-content;

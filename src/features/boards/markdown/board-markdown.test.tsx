@@ -104,6 +104,28 @@ describe("BoardMarkdown", () => {
     );
   });
 
+  it("preserves loose list paragraphs and nested cost lists", () => {
+    const { container } = render(
+      <BoardMarkdown
+        markdown={`1. 얼굴 브로치 만들기
+
+   - 비용 - 15,000 원
+
+2. 종이로 만드는 어린이 집
+
+   - 비용 : 15,000 원
+
+3. 8월 1일 전시 연계 프로그램 진행`}
+      />,
+    );
+
+    const orderedList = container.querySelector(".board-markdown > ol");
+
+    expect(orderedList?.querySelectorAll(":scope > li")).toHaveLength(3);
+    expect(orderedList?.querySelectorAll(":scope > li > p")).toHaveLength(3);
+    expect(orderedList?.querySelectorAll(":scope > li > ul")).toHaveLength(2);
+  });
+
   it("adds a decorative indicator only to external links", () => {
     const { container } = render(
       <BoardMarkdown
