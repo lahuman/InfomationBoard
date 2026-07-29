@@ -23,6 +23,7 @@
     "audit": "npm audit --audit-level=high"
   },
   "dependencies": {
+    "@milkdown/kit": "7.21.3",
     "@supabase/ssr": "0.12.3",
     "@supabase/supabase-js": "2.110.9",
     "argon2": "0.45.1",
