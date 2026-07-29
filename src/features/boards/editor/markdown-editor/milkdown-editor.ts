@@ -231,7 +231,7 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
     const controller: MarkdownEditorController = {
       getMarkdown: () => normalizeMarkdown(editor.action(getMarkdown())),
       replaceMarkdown: (next) => {
-        if (next === lastExternalMarkdown) return;
+        if (normalizeMarkdown(next) === lastExternalMarkdown) return;
 
         editor.action((ctx) => {
           if (!ctx.get(parserCtx)(next)) throw new MarkdownParseError();

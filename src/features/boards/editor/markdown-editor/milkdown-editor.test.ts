@@ -159,6 +159,56 @@ describe("createMilkdownEditorController", () => {
     expect(onMarkdownChange).not.toHaveBeenCalled();
   });
 
+  it("ignores an externally supplied terminal-newline variant", async () => {
+    const onMarkdownChange = vi.fn();
+    const onToolbarStateChange = vi.fn();
+    const { controller } = await setup("**처음**", {
+      onMarkdownChange,
+      onToolbarStateChange,
+    });
+    __testing.selectText(controller, 1, 3);
+    const toolbarCallCount = onToolbarStateChange.mock.calls.length;
+
+    controller.replaceMarkdown("**처음**\n");
+
+    expect(onMarkdownChange).not.toHaveBeenCalled();
+    expect(onToolbarStateChange).toHaveBeenCalledTimes(toolbarCallCount);
+    expect(controller.getToolbarState().bold.active).toBe(true);
+    expect(controller.run("bold")).toBe(true);
+    expect(controller.getMarkdown()).toBe("처음");
+  });
+
+  it("publishes toolbar changes without duplicating an unchanged selection", async () => {
+    const onToolbarStateChange = vi.fn();
+    const { controller } = await setup("**강조** 보통", {
+      onToolbarStateChange,
+    });
+
+    __testing.selectText(controller, 4, 6);
+    expect(controller.getToolbarState().bold).toEqual({
+      active: false,
+      enabled: true,
+    });
+
+    __testing.selectText(controller, 1, 3);
+    expect(controller.getToolbarState().bold).toEqual({
+      active: true,
+      enabled: true,
+    });
+
+    expect(controller.run("bold")).toBe(true);
+    expect(controller.getToolbarState().bold).toEqual({
+      active: false,
+      enabled: true,
+    });
+    expect(controller.getToolbarState().undo.enabled).toBe(true);
+
+    const toolbarCallCount = onToolbarStateChange.mock.calls.length;
+    __testing.selectText(controller, 1, 3);
+    __testing.selectText(controller, 1, 3);
+    expect(onToolbarStateChange).toHaveBeenCalledTimes(toolbarCallCount);
+  });
+
   it("round-trips GFM tables and strikethrough", async () => {
     const markdown =
       "~~마감~~\n\n| 시간 | 내용 |\n| --- | --- |\n| 14:00 | 시작 |";
