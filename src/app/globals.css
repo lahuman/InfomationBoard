@@ -1771,7 +1771,7 @@ a {
 }
 
 .sample-board-nav a:focus-visible {
-  outline: 3px solid var(--public-accent);
+  outline: 3px solid var(--foreground);
   outline-offset: 3px;
 }
 
