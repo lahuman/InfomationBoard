@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(62);
+select plan(73);
 
 select has_function(
   'public',
@@ -16,9 +16,15 @@ select has_function(
 );
 select has_function(
   'public',
-  'cancel_board_image',
-  array['uuid'],
-  'image cancellation uses an authenticated RPC boundary'
+  'claim_board_image_cancellation',
+  array['uuid', 'uuid'],
+  'image cancellation claims use an authenticated RPC boundary'
+);
+select has_function(
+  'public',
+  'complete_board_image_cancellation',
+  array['uuid', 'uuid'],
+  'claimed image cancellation completion uses an authenticated RPC boundary'
 );
 select has_function(
   'public',
@@ -99,6 +105,16 @@ select results_eq(
        array['image/jpeg','image/png','image/webp','image/gif']::text[]
      ) $$,
   'the board-images bucket accepts only the four supported MIME types'
+);
+select results_eq(
+  $$ select array_agg(cmd order by cmd)::text[]
+     from pg_policies
+     where schemaname = 'storage'
+       and tablename = 'objects'
+       and policyname = 'board_image_reserved_insert'
+       and roles @> array['authenticated'::name] $$,
+  $$ values (array['INSERT']::text[]) $$,
+  'authenticated board image storage access grants INSERT policy only'
 );
 
 insert into auth.users (
@@ -181,6 +197,30 @@ select results_eq(
   array[true],
   'a reservation receives an owner and board scoped storage path'
 );
+select lives_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id)
+     select 'board-images', storage_path, auth.uid()
+     from public.attachments
+     where original_filename = 'poster.png' $$,
+  'authenticated owners can upload only to a live reserved path'
+);
+select throws_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id)
+     values (
+       'board-images',
+       '10000000-0000-4000-8000-000000000001/30000000-0000-4000-8000-000000000003/not-reserved',
+       auth.uid()
+     ) $$,
+  '42501', null,
+  'authenticated owners cannot upload to an unreserved path'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from storage.objects
+     where bucket_id = 'board-images' $$,
+  array[0::bigint],
+  'the upload-only policy does not grant object listing'
+);
 select results_eq(
   $$ select storage_bytes from public.profiles
      where id = '10000000-0000-4000-8000-000000000001' $$,
@@ -219,11 +259,52 @@ select throws_ok(
   'P0001', 'image_invalid_mime_type',
   'unsupported MIME types receive a stable application error'
 );
-select lives_ok(
-  $$ select public.cancel_board_image(id)
+select results_eq(
+  $$ select claimed.state
+     from public.attachments
+     cross join lateral public.claim_board_image_cancellation(
+       attachments.board_id,
+       attachments.id
+     ) as claimed
+     where attachments.original_filename = 'poster.png' $$,
+  array['cancelling'::text],
+  'cancellation atomically claims a reserved image'
+);
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       (select id from public.attachments
+        where original_filename = 'poster.png'),
+       'image/png', 10485760
+     ) $$,
+  'P0001', 'image_cancellation_in_progress',
+  'finalization cannot race past a cancellation claim'
+);
+select results_eq(
+  $$ select claimed.storage_path
+     from public.attachments
+     cross join lateral public.claim_board_image_cancellation(
+       attachments.board_id,
+       attachments.id
+     ) as claimed
+     where attachments.original_filename = 'poster.png' $$,
+  $$ select storage_path
      from public.attachments
      where original_filename = 'poster.png' $$,
-  'an owner cancels a reserved image'
+  'claiming an already-cancelling image is idempotent'
+);
+select throws_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id)
+     select 'board-images', storage_path, auth.uid()
+     from public.attachments
+     where original_filename = 'poster.png' $$,
+  '42501', null,
+  'authenticated uploads are denied after cancellation is claimed'
+);
+select lives_ok(
+  $$ select public.complete_board_image_cancellation(board_id, id)
+     from public.attachments
+     where original_filename = 'poster.png' $$,
+  'an owner completes a claimed cancellation'
 );
 select results_eq(
   $$ select storage_bytes from public.profiles
@@ -269,9 +350,17 @@ select lives_ok(
   'a full board does not consume another board image count'
 );
 select lives_ok(
-  $$ select public.cancel_board_image(id)
-     from public.attachments
-     where original_filename = 'other-board.png' $$,
+  $$ with claimed as (
+       select claimed.id, attachments.board_id
+       from public.attachments
+       cross join lateral public.claim_board_image_cancellation(
+         attachments.board_id,
+         attachments.id
+       ) as claimed
+       where attachments.original_filename = 'other-board.png'
+     )
+     select public.complete_board_image_cancellation(board_id, id)
+     from claimed $$,
   'the separate-board count fixture can be cancelled'
 );
 select results_eq(
@@ -318,10 +407,26 @@ select throws_ok(
   'P0001', 'image_reservation_expired',
   'an expired reservation cannot be finalized'
 );
-select lives_ok(
-  $$ select public.cancel_board_image(id)
+select throws_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id)
+     select 'board-images', storage_path, auth.uid()
      from public.attachments
      where original_filename = 'expired.png' $$,
+  '42501', null,
+  'authenticated uploads are denied after reservation expiry'
+);
+select lives_ok(
+  $$ with claimed as (
+       select claimed.id, attachments.board_id
+       from public.attachments
+       cross join lateral public.claim_board_image_cancellation(
+         attachments.board_id,
+         attachments.id
+       ) as claimed
+       where attachments.original_filename = 'expired.png'
+     )
+     select public.complete_board_image_cancellation(board_id, id)
+     from claimed $$,
   'an expired reservation can still be cancelled'
 );
 
@@ -449,6 +554,14 @@ select results_eq(
      where id = '10000000-0000-4000-8000-000000000001' $$,
   array[2048::bigint],
   'idempotent finalization does not double count bytes'
+);
+select throws_ok(
+  $$ insert into storage.objects (bucket_id, name, owner_id)
+     select 'board-images', storage_path, auth.uid()
+     from public.attachments
+     where original_filename = 'ready.webp' $$,
+  '42501', null,
+  'authenticated uploads are denied after finalization'
 );
 select results_eq(
   $$ select public.delete_board_image_record(id)
@@ -648,7 +761,12 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
-    'public.cancel_board_image(uuid)',
+    'public.claim_board_image_cancellation(uuid,uuid)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'anon',
+    'public.complete_board_image_cancellation(uuid,uuid)',
     'EXECUTE'
   )
   and not has_function_privilege(

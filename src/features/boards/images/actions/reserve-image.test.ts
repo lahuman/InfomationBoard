@@ -10,24 +10,16 @@ const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
   cleanupExpiredBoardImages: vi.fn(),
   rpc: vi.fn(),
-  adminStorageFrom: vi.fn(),
-  createSignedUploadUrl: vi.fn(),
 }));
+
+vi.mock("server-only", () => ({}));
 
 vi.mock("@/features/auth/require-user", () => ({
   requireUser: mocks.requireUser,
 }));
 
 vi.mock("@/lib/supabase/server", () => ({
-  createServerSupabaseClient: vi.fn(async () => ({
-    rpc: mocks.rpc,
-  })),
-}));
-
-vi.mock("@/lib/supabase/admin", () => ({
-  createAdminSupabaseClient: vi.fn(() => ({
-    storage: { from: mocks.adminStorageFrom },
-  })),
+  createServerSupabaseClient: vi.fn(async () => ({ rpc: mocks.rpc })),
 }));
 
 vi.mock("../storage", () => ({
@@ -38,9 +30,6 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.requireUser.mockResolvedValue({ id: ownerId, email: null });
   mocks.cleanupExpiredBoardImages.mockResolvedValue({ ok: true });
-  mocks.adminStorageFrom.mockReturnValue({
-    createSignedUploadUrl: mocks.createSignedUploadUrl,
-  });
   mocks.rpc.mockResolvedValue({
     data: [
       {
@@ -52,10 +41,6 @@ beforeEach(() => {
         reservation_expires_at: "2026-07-29T10:15:00.000Z",
       },
     ],
-    error: null,
-  });
-  mocks.createSignedUploadUrl.mockResolvedValue({
-    data: { path: storagePath, token: "signed-token", signedUrl: "hidden" },
     error: null,
   });
 });
@@ -79,7 +64,7 @@ describe("reserveBoardImage", () => {
     expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
-  it("authenticates the owner, cleans expiry first, normalizes the display name, and signs without upsert", async () => {
+  it("authenticates, cleans expiry first, normalizes the name, and returns no reusable token", async () => {
     const calls: string[] = [];
     mocks.cleanupExpiredBoardImages.mockImplementation(async () => {
       calls.push("cleanup");
@@ -113,7 +98,6 @@ describe("reserveBoardImage", () => {
       status: "reserved",
       attachmentId,
       path: storagePath,
-      token: "signed-token",
     });
 
     expect(mocks.requireUser).toHaveBeenCalledWith(`/boards/${boardId}/edit`);
@@ -126,9 +110,6 @@ describe("reserveBoardImage", () => {
       p_original_filename: "poster.png",
       p_mime_type: "image/png",
       p_size_bytes: 120,
-    });
-    expect(mocks.createSignedUploadUrl).toHaveBeenCalledWith(storagePath, {
-      upsert: false,
     });
     expect(calls).toEqual(["cleanup", "reserve_board_image"]);
   });
@@ -155,7 +136,7 @@ describe("reserveBoardImage", () => {
     expect(JSON.stringify(result)).not.toContain(storagePath);
   });
 
-  it("does not reserve when expired object cleanup cannot complete", async () => {
+  it("does not reserve when expired cleanup cannot complete", async () => {
     mocks.cleanupExpiredBoardImages.mockResolvedValueOnce({ ok: false });
 
     await expect(
@@ -168,25 +149,5 @@ describe("reserveBoardImage", () => {
     ).resolves.toMatchObject({ status: "error", code: "unavailable" });
 
     expect(mocks.rpc).not.toHaveBeenCalled();
-  });
-
-  it("cancels a reservation when signed token creation fails and returns no path", async () => {
-    mocks.createSignedUploadUrl.mockResolvedValueOnce({
-      data: null,
-      error: { message: `signing failed for ${storagePath}` },
-    });
-
-    const result = await reserveBoardImage({
-      boardId,
-      originalFilename: "poster.png",
-      mimeType: "image/png",
-      sizeBytes: 120,
-    });
-
-    expect(mocks.rpc).toHaveBeenLastCalledWith("cancel_board_image", {
-      p_attachment_id: attachmentId,
-    });
-    expect(result).toMatchObject({ status: "error", code: "unavailable" });
-    expect(JSON.stringify(result)).not.toContain(storagePath);
   });
 });

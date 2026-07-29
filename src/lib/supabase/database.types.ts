@@ -172,12 +172,20 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
-      cancel_board_image: {
-        Args: { p_attachment_id: string }
-        Returns: undefined
+      claim_board_image_cancellation: {
+        Args: { p_attachment_id: string; p_board_id: string }
+        Returns: {
+          id: string
+          state: string
+          storage_path: string
+        }[]
       }
       clear_password_failures_for_server: {
         Args: { p_anonymous_key_hash: string; p_board_id: string }
+        Returns: undefined
+      }
+      complete_board_image_cancellation: {
+        Args: { p_attachment_id: string; p_board_id: string }
         Returns: undefined
       }
       delete_board_image_record: {

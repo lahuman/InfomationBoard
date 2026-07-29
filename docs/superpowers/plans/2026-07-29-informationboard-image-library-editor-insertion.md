@@ -4,17 +4,18 @@
 
 **Goal:** Build a secure board-scoped image library with atomic 50 MB account quotas, direct uploads, safe deletion, access-controlled delivery, and rich/source editor insertion.
 
-**Architecture:** PostgreSQL owns reservations and quota accounting, a private Supabase Storage bucket owns image bytes, and server actions coordinate signed direct uploads and verified lifecycle transitions. Markdown stores `/b/<slug>/images/<attachment-id>` URLs; an authorized Next.js route streams private objects, while a focused image-library component integrates with the existing Milkdown editor.
+**Architecture:** PostgreSQL owns reservations and quota accounting, a private Supabase Storage bucket owns image bytes, and an authenticated exact-reservation INSERT policy plus server actions coordinate direct uploads and verified lifecycle transitions. Markdown stores `/b/<slug>/images/<attachment-id>` URLs; an authorized Next.js route streams private objects, while a focused image-library component integrates with the existing Milkdown editor.
 
 **Tech Stack:** Next.js 16 App Router, React 19, TypeScript 6, Supabase PostgreSQL/Storage, Zod 4, Milkdown 7, Sharp 0.35, React Markdown 10, Vitest 4, Testing Library, pgTAP, Playwright 1.62.
 
 ## Global Constraints
 
 - Account limit is exactly `52,428,800` bytes (50 MiB), counting both `reserved` and `ready` rows.
-- Per-image limit is exactly `10,485,760` bytes (10 MiB), with no more than 20 reserved or ready images per board.
+- Per-image limit is exactly `10,485,760` bytes (10 MiB), with no more than 20 reserved, cancelling, or ready images per board.
 - Reservations expire after 15 minutes and are reclaimed before the next list or reservation operation; no scheduler is required.
 - Only JPEG (`image/jpeg`), PNG (`image/png`), WebP (`image/webp`), and GIF (`image/gif`) are accepted; SVG and general files remain out of scope.
 - Storage bucket `board-images` remains private and object paths are `<owner-id>/<board-id>/<attachment-id>`.
+- Authenticated Storage access is INSERT-only for the caller's exact unexpired `reserved` path, always with `upsert: false`; there are no authenticated object list, update, overwrite, move, or delete policies.
 - Browser checks improve feedback, but database ownership/quota checks and server byte decoding are authoritative.
 - Only `ready` images can be listed, inserted, delivered, or deleted through the normal ready-image flow.
 - Stable Markdown URLs use `/b/<board-slug>/images/<attachment-id>` so the existing board-scoped password cookie is sent.
@@ -36,7 +37,7 @@
 
 ### Database and generated contract
 
-- Create `supabase/migrations/20260729000100_board_images.sql`: private bucket, constraints, atomic quota triggers, reservation/finalize/cancel/delete RPCs, grants.
+- Create `supabase/migrations/20260729000100_board_images.sql`: private bucket, exact-reservation INSERT policy, constraints, atomic quota triggers, reservation/finalize/cancellation-claim/delete RPCs, grants.
 - Create `supabase/tests/phase5_board_images.test.sql`: pgTAP quota, ownership, count, state, and release tests.
 - Modify `supabase/tests/phase2_rls.test.sql`: replace now-revoked direct attachment writes with the supported reservation RPC.
 - Modify `src/lib/supabase/database.types.ts`: generated attachment and RPC signatures.
@@ -46,7 +47,7 @@
 - Create `src/features/boards/images/queries.ts` and tests: owner library/profile usage query and row mapping.
 - Create `src/features/boards/images/storage.ts` and tests: admin bucket operations, expiry cleanup, and Sharp verification.
 - Create `src/features/boards/images/actions/reserve-image.ts`, `finalize-image.ts`, `cancel-image.ts`, `delete-image.ts` and focused tests.
-- Create `src/features/boards/images/upload-image.ts` and tests: browser signed-upload coordinator.
+- Create `src/features/boards/images/upload-image.ts` and tests: authenticated browser upload coordinator.
 - Modify `src/features/boards/actions/delete-board.ts` and tests: remove board objects before row cascade.
 
 ### Delivery and rendering
@@ -203,7 +204,7 @@ git commit -m "feat: define image limits and references"
 
 **Interfaces:**
 - Consumes: exact byte, MIME, count, bucket, and expiry constants from Task 1, duplicated as SQL literals at the database trust boundary.
-- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `cancel_board_image(uuid)`, and `delete_board_image_record(uuid)` plus updated generated TypeScript signatures.
+- Produces: RPCs `reserve_board_image(uuid,text,text,bigint)`, `finalize_board_image(uuid,text,bigint)`, `claim_board_image_cancellation(uuid,uuid)`, `complete_board_image_cancellation(uuid,uuid)`, and `delete_board_image_record(uuid)` plus updated generated TypeScript signatures.
 
 - [ ] **Step 1: Write failing pgTAP coverage**
 
@@ -235,7 +236,7 @@ select throws_ok(
 );
 ```
 
-Also assert zero/oversized files, rejected MIME, foreign board, 21st row, expired finalize, size-growth overflow, idempotent ready finalize, cancel release, delete release, board cascade release, direct attachment mutation denial, and direct `storage_bytes` update denial. Modify the Phase 2 attachment assertions to call `reserve_board_image` with `owner.png` and `image/png` because direct writes and PDFs are intentionally revoked.
+Also assert zero/oversized files, rejected MIME, foreign board, 21st row, expired finalize, size-growth overflow, idempotent ready finalize, cancellation claim/completion release, delete release, board cascade release, direct attachment mutation denial, exact-path Storage INSERT admission, wrong/expired/ready/cancelling path denial, absence of Storage list/update/delete policies, and direct `storage_bytes` update denial. Modify the Phase 2 attachment assertions to call `reserve_board_image` with `owner.png` and `image/png` because direct writes and PDFs are intentionally revoked.
 
 - [ ] **Step 2: Run database tests to prove the migration is absent**
 
@@ -271,6 +272,11 @@ grant select on public.attachments to authenticated;
 
 Replace the attachment size/state checks with named constraints that also allow only the four image MIME values. Add a private `before insert or update of size_bytes` trigger that locks `public.profiles FOR UPDATE`, calculates the byte delta, rejects totals outside `0..52428800`, and updates `storage_bytes`. Add an `after delete` trigger that subtracts `old.size_bytes` with `greatest(0, ...)`, covering cancel, ready delete, board cascade, and account cleanup.
 
+Add one `storage.objects` INSERT policy for `authenticated`. Its `WITH CHECK`
+requires bucket `board-images` and an exact live owned `reserved` attachment
+whose `storage_path = storage.objects.name` and whose expiry is in the future.
+Do not add client SELECT, UPDATE, DELETE, list, move, or overwrite policies.
+
 - [ ] **Step 4: Implement least-privilege lifecycle RPCs**
 
 Each function is `security definer set search_path = ''`, checks `auth.uid()`, schema-qualifies every relation, and raises only stable application codes such as `image_quota_exceeded`, `image_limit_exceeded`, `image_not_found`, or `image_reservation_expired`.
@@ -282,7 +288,9 @@ storage_path := auth.uid()::text || '/' || p_board_id::text || '/' || attachment
 reservation_expires_at := now() + interval '15 minutes';
 ```
 
-It returns `id`, `storage_path`, `original_filename`, `mime_type`, `size_bytes`, and `reservation_expires_at`. `finalize_board_image` locks the owned reservation, applies verified MIME/actual size, sets `state = 'ready'`, clears expiry, and returns the ready row; if already ready with identical metadata, return it unchanged. `cancel_board_image` deletes only an owned reserved row. `delete_board_image_record` deletes only an owned ready row and returns whether one row was removed. Revoke public execution and grant only the intended RPCs to `authenticated`.
+It returns `id`, `storage_path`, `original_filename`, `mime_type`, `size_bytes`, and `reservation_expires_at`. `finalize_board_image` locks the owned reservation, applies verified MIME/actual size, sets `state = 'ready'`, clears expiry, and returns the ready row; if already ready with identical metadata, return it unchanged, and if `cancelling`, raise `image_cancellation_in_progress`.
+
+`claim_board_image_cancellation(board_id, attachment_id)` locks the exact owned row, atomically changes `reserved` to `cancelling`, and idempotently returns the same path when already cancelling. `complete_board_image_cancellation(board_id, attachment_id)` deletes only the exact owned cancelling row after server object removal, releasing quota through the delete trigger. `delete_board_image_record` deletes only an owned ready row and returns whether one row was removed. Revoke public execution and grant only the intended RPCs to `authenticated`.
 
 - [ ] **Step 5: Regenerate and inspect TypeScript database types**
 
@@ -292,7 +300,7 @@ Run:
 npx supabase gen types typescript --local > /tmp/informationboard-database.types.ts
 ```
 
-Copy the generated `Database` definition into `src/lib/supabase/database.types.ts` and verify the four RPC argument/return signatures and attachment row types are present. Do not hand-edit unrelated generated declarations.
+Copy the generated `Database` definition into `src/lib/supabase/database.types.ts` and verify the five lifecycle RPC argument/return signatures and attachment row types are present. Do not hand-edit unrelated generated declarations.
 
 - [ ] **Step 6: Run database tests and typecheck**
 
@@ -391,13 +399,13 @@ git commit -m "feat: load board image libraries"
 
 - [ ] **Step 1: Write failing server lifecycle tests**
 
-Cover invalid inputs before auth, owner auth path, expired cleanup before reserve, RPC error-code mapping, signed token creation with `upsert: false`, missing object, malformed bytes, MIME mismatch, actual-size adjustment, idempotent finalize, object cleanup on failure, safe errors, and path non-disclosure.
+Cover invalid inputs before auth, owner auth path, expired cleanup before reserve, RPC error-code mapping, tokenless reservation, exact missing-object classification, malformed bytes, MIME mismatch, actual-size adjustment, idempotent finalize, finalize response-loss recovery, cancellation claim ordering, safe errors, and path non-disclosure.
 
 The success contracts are exact:
 
 ```ts
 type ReserveBoardImageResult =
-  | { status: "reserved"; attachmentId: string; path: string; token: string }
+  | { status: "reserved"; attachmentId: string; path: string }
   | { status: "error"; code: "invalid" | "quota" | "limit" | "unavailable"; message: string };
 
 type FinalizeBoardImageResult =
@@ -409,11 +417,11 @@ type CancelBoardImageResult = { status: "cancelled" } | { status: "error"; messa
 
 - [ ] **Step 2: Write failing browser coordinator tests**
 
-Inject a fake browser client and actions. Assert the exact order `reserve -> uploadToSignedUrl -> finalize`; on upload failure assert `cancel` is called once and finalize is not called:
+Inject a fake browser client and actions. Assert the exact order `reserve -> upload -> finalize`; on upload failure or browser upload setup exception assert `cancel` is called once and finalize is not called. Reserve and finalize exceptions must return safe results; a finalize rejection must not cancel because the database response may have been lost:
 
 ```ts
 expect(calls).toEqual(["reserve", "upload", "finalize"]);
-expect(uploadToSignedUrl).toHaveBeenCalledWith(path, token, file, {
+expect(upload).toHaveBeenCalledWith(path, file, {
   contentType: "image/png",
   upsert: false,
 });
@@ -442,15 +450,17 @@ const mimeType = ({ jpeg: "image/jpeg", png: "image/png", webp: "image/webp", gi
 if (!mimeType) throw new InvalidStoredImageError();
 ```
 
-Return verified bytes and MIME only; never trust the filename or upload header. `cleanupExpiredBoardImages(ownerId, authenticatedClient)` selects the owner's expired reserved rows with the admin client, removes their exact objects, then invokes `cancel_board_image` through the authenticated client per row. If object removal fails, retain the row/quota and return a cleanup failure so reservation does not silently continue. Call this helper before both reservation and `getBoardImageLibrary` so opening the panel also reclaims stale quota.
+Return verified bytes and MIME only; never trust the filename or upload header. Treat an object as missing only for the exact `{ name: "StorageApiError", status: 404, message: "Object not found" }` shape.
+
+`cancelBoardImageReservation(boardId, attachmentId, authenticatedClient)` first calls `claim_board_image_cancellation`, removes only the returned server path, and calls `complete_board_image_cancellation` only after removal succeeds or returns that exact missing-object response. A removal failure leaves the row `cancelling` with quota intact for retry. `cleanupExpiredBoardImages(ownerId, authenticatedClient)` selects the owner's expired reserved and already-cancelling rows and routes every candidate through this same helper. Call it before both reservation and `getBoardImageLibrary` so opening the panel also reclaims stale quota.
 
 - [ ] **Step 5: Implement the three server actions**
 
-All inputs use strict Zod schemas and call `requireUser(/boards/${boardId}/edit)`. `reserveBoardImage` normalizes the display filename, cleans expired rows, calls `reserve_board_image`, then calls `createSignedUploadUrl(storage_path, { upsert: false })`; if signing fails, cancel the reservation.
+All inputs use strict Zod schemas and call `requireUser(/boards/${boardId}/edit)`. `reserveBoardImage` normalizes the display filename, cleans expired rows, calls `reserve_board_image`, and returns only the attachment ID and server path. It never creates or returns an upload token.
 
-`finalizeBoardImage` loads the owned reserved row, verifies its stored object, calls `finalize_board_image` with verified MIME and bytes, maps the returned ready row with the board slug, and reads current profile usage. On verification/finalize failure, remove the object and cancel the reserved row.
+`finalizeBoardImage` loads the owned reserved row, verifies its stored object, calls `finalize_board_image` with verified MIME and bytes, maps the returned ready row with the board slug, and reads current profile usage. If the RPC returns an error, throws, or returns malformed data, re-read the exact owned row: recover success only for a matching `ready` row, cancel only a row confirmed still `reserved`, and perform no destructive cleanup when the re-read is ambiguous or reports `cancelling`.
 
-`cancelBoardImage` first resolves the owned reserved row so the client cannot supply a path, removes the object idempotently, then calls `cancel_board_image`.
+`cancelBoardImage` authenticates and delegates to the shared claim/remove/complete helper, so the client never supplies a path and every retry follows the same state machine.
 
 - [ ] **Step 6: Implement the browser upload coordinator**
 
@@ -466,7 +476,7 @@ const reserved = await reserveAction({
 if (reserved.status !== "reserved") return reserved;
 const upload = await supabase.storage
   .from(IMAGE_BUCKET)
-  .uploadToSignedUrl(reserved.path, reserved.token, file, {
+  .upload(reserved.path, file, {
     contentType: file.type,
     upsert: false,
   });

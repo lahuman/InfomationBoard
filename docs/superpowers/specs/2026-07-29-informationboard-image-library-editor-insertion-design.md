@@ -42,11 +42,13 @@ The feature uses the existing `public.profiles`, `public.boards`, and
 private `board-images` bucket. PostgreSQL remains authoritative for ownership,
 reservation state, and quota accounting.
 
-The browser uploads directly to Supabase Storage using a short-lived signed
-upload token. A Next.js server action creates the reservation and token, and a
-second server action verifies and finalizes the stored image. This keeps the
-binary request body out of the Next.js deployment while preserving
-server-authoritative limits.
+The authenticated browser uploads directly to Supabase Storage after a Next.js
+server action creates a database reservation. A narrowly scoped Storage INSERT
+policy permits only the exact path of the caller's live owned reservation; it
+does not grant list, overwrite, update, move, or delete access. A second server
+action verifies and finalizes the stored image. This keeps the binary request
+body out of the Next.js deployment while preserving server-authoritative
+limits.
 
 Markdown stores a stable application URL based on the attachment identifier,
 not a temporary Storage URL. A Next.js image route authorizes every request
@@ -60,7 +62,7 @@ draft, and owner access therefore follow the same rules as the board itself.
 
 - Account limit: `52,428,800` bytes (50 MiB).
 - Per-image limit: `10,485,760` bytes (10 MiB).
-- Per-board limit: 20 reserved or ready image rows.
+- Per-board limit: 20 reserved, cancelling, or ready image rows.
 - Reservation lifetime: 15 minutes.
 
 UI copy uses MB consistently with the existing binary byte formatter.
@@ -74,8 +76,9 @@ The existing attachment columns remain sufficient:
   untrusted filename;
 - `original_filename`, `mime_type`, and `size_bytes` hold verified display
   metadata;
-- `state` is `reserved` during upload and `ready` after verification;
-- `reservation_expires_at` is present only while reserved.
+- `state` is `reserved` during upload, `cancelling` while server cleanup owns
+  the object-removal claim, and `ready` after verification;
+- `reservation_expires_at` is present while reserved or cancelling.
 
 A forward-only migration tightens the table to the accepted image MIME types,
 keeps the 10 MB size constraint, and adds the functions and triggers needed for
@@ -108,9 +111,11 @@ The migration creates a private `board-images` bucket with a 10 MB object limit
 and the JPEG, PNG, WebP, and GIF MIME allowlist. Paths have the form
 `<owner-id>/<board-id>/<attachment-id>`.
 
-Clients receive only a signed upload token for the exact reserved path. They do
-not receive general list, overwrite, move, or delete access. Server actions use
-the existing server-only administrative client for verification and cleanup.
+Authenticated clients may INSERT only when an unexpired owned attachment is
+still `reserved` and `storage.objects.name` exactly equals its server-generated
+path. There are no client Storage SELECT, UPDATE, UPSERT, DELETE, list, move, or
+overwrite policies. Server actions use the existing server-only administrative
+client for verification and cleanup.
 
 ## 5. Upload Flow
 
@@ -120,9 +125,11 @@ the existing server-only administrative client for verification and cleanup.
 3. The reservation action authenticates the user and validates all inputs.
 4. The database atomically reserves quota and returns a random attachment ID
    and storage path.
-5. The server returns a short-lived signed upload token for that exact path.
-6. The browser uploads directly to the private bucket and reports progress or a
-   clear uploading state.
+5. The server returns the reservation ID and exact server-generated path, with
+   no reusable upload credential.
+6. The authenticated browser uploads with `upsert: false`; Storage RLS admits
+   only the live reservation path and reports progress or a clear uploading
+   state.
 7. The finalize action downloads the stored object with the server-only client
    and decodes it with `sharp` to prove it is a JPEG, PNG, WebP, or GIF. It also
    verifies actual byte size and rejects a zero-byte, oversized, mismatched, or
@@ -131,8 +138,11 @@ the existing server-only administrative client for verification and cleanup.
    atomically only when the final total still fits 50 MB.
 9. The attachment becomes `ready`, its expiry is cleared, and the refreshed
    image appears in the panel and storage meter.
-10. Any failure removes the object when present and cancels the reservation so
-    the owner can retry without losing quota.
+10. A pre-finalize upload failure claims cancellation, transitions the row to
+    `cancelling`, removes the object, and then deletes the row to release quota.
+    A finalize transport failure first re-reads the owned row: a matching
+    `ready` row recovers success, a confirmed `reserved` row may be cancelled,
+    and an ambiguous read or `cancelling` row is retained for safe retry.
 
 Only ready attachments can be inserted or served. An upload may not overwrite
 an existing path.
@@ -248,8 +258,11 @@ failed storage cleanup prevents board deletion and returns a retryable error.
   uncounted object.
 - Finalization is idempotent: retrying an already-ready attachment returns its
   current metadata rather than charging quota again.
-- Cancellation and deletion are idempotent for already-absent objects when the
-  authenticated attachment record establishes the intended target.
+- Cancellation atomically claims `reserved -> cancelling` before object
+  removal. Retrying a `cancelling` row resumes the same exact path; completion
+  deletes metadata and releases quota only after removal succeeds or Storage
+  returns the exact `StorageApiError` 404 `Object not found` response.
+- Finalization refuses `cancelling` rows, so cleanup and readiness cannot race.
 
 ## 11. Testing and Verification
 
@@ -268,8 +281,9 @@ Implementation is test-driven.
 
 ### Server tests
 
-- reservation, signed upload creation, finalize, cancellation, retry, and
-  deletion map each expected result to safe errors;
+- reservation, authenticated exact-path upload, finalize response-loss
+  recovery, cancellation claims, retry, and deletion map each expected result
+  to safe errors;
 - malformed or MIME-mismatched image bytes are removed and quota is released;
 - only ready images are returned by editor queries and delivery routes;
 - public, password, private, draft, owner, missing, and unauthorized delivery

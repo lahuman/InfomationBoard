@@ -19,6 +19,23 @@ on conflict (id) do update set
   file_size_limit = excluded.file_size_limit,
   allowed_mime_types = excluded.allowed_mime_types;
 
+drop policy if exists board_image_reserved_insert on storage.objects;
+create policy board_image_reserved_insert
+on storage.objects
+for insert
+to authenticated
+with check (
+  bucket_id = 'board-images'
+  and exists (
+    select 1
+    from public.attachments
+    where attachments.owner_id = (select auth.uid())
+      and attachments.storage_path = objects.name
+      and attachments.state = 'reserved'
+      and attachments.reservation_expires_at > now()
+  )
+);
+
 revoke update on public.profiles from authenticated;
 grant update (display_name) on public.profiles to authenticated;
 revoke insert, update, delete on public.attachments from authenticated;
@@ -68,10 +85,10 @@ add constraint attachments_size_bytes_bounds
 add constraint attachments_mime_type
   check (mime_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
 add constraint attachments_state
-  check (state in ('reserved', 'ready')),
+  check (state in ('reserved', 'cancelling', 'ready')),
 add constraint attachments_reservation_state
   check (
-    (state = 'reserved' and reservation_expires_at is not null)
+    (state in ('reserved', 'cancelling') and reservation_expires_at is not null)
     or (state = 'ready' and reservation_expires_at is null)
   );
 
@@ -314,6 +331,10 @@ begin
     raise exception 'image_already_finalized';
   end if;
 
+  if owned_attachment.state = 'cancelling' then
+    raise exception 'image_cancellation_in_progress';
+  end if;
+
   if p_actual_size_bytes is null
     or p_actual_size_bytes <= 0
     or p_actual_size_bytes > 10485760
@@ -357,7 +378,64 @@ begin
 end;
 $$;
 
-create function public.cancel_board_image(p_attachment_id uuid)
+create function public.claim_board_image_cancellation(
+  p_board_id uuid,
+  p_attachment_id uuid
+)
+returns table (
+  id uuid,
+  storage_path text,
+  state text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  account_id uuid := auth.uid();
+  owned_attachment public.attachments%rowtype;
+begin
+  if account_id is null then
+    raise exception 'image_not_found';
+  end if;
+
+  select attachments.*
+  into owned_attachment
+  from public.attachments
+  where attachments.id = p_attachment_id
+    and attachments.board_id = p_board_id
+    and attachments.owner_id = account_id
+  for update;
+
+  if not found then
+    raise exception 'image_not_found';
+  end if;
+
+  if owned_attachment.state = 'ready' then
+    raise exception 'image_already_finalized';
+  end if;
+
+  if owned_attachment.state = 'reserved' then
+    update public.attachments
+    set state = 'cancelling'
+    where attachments.id = owned_attachment.id
+    returning * into owned_attachment;
+  elsif owned_attachment.state <> 'cancelling' then
+    raise exception 'image_invalid_state';
+  end if;
+
+  return query
+  select
+    owned_attachment.id,
+    owned_attachment.storage_path,
+    owned_attachment.state;
+end;
+$$;
+
+create function public.complete_board_image_cancellation(
+  p_board_id uuid,
+  p_attachment_id uuid
+)
 returns void
 language plpgsql
 security definer
@@ -372,8 +450,9 @@ begin
 
   delete from public.attachments
   where attachments.id = p_attachment_id
+    and attachments.board_id = p_board_id
     and attachments.owner_id = account_id
-    and attachments.state = 'reserved';
+    and attachments.state = 'cancelling';
 
   if not found then
     raise exception 'image_not_found';
@@ -407,7 +486,9 @@ revoke all on function public.reserve_board_image(uuid, text, text, bigint)
 from public, anon, authenticated;
 revoke all on function public.finalize_board_image(uuid, text, bigint)
 from public, anon, authenticated;
-revoke all on function public.cancel_board_image(uuid)
+revoke all on function public.claim_board_image_cancellation(uuid, uuid)
+from public, anon, authenticated;
+revoke all on function public.complete_board_image_cancellation(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function public.delete_board_image_record(uuid)
 from public, anon, authenticated;
@@ -416,7 +497,9 @@ grant execute on function public.reserve_board_image(uuid, text, text, bigint)
 to authenticated;
 grant execute on function public.finalize_board_image(uuid, text, bigint)
 to authenticated;
-grant execute on function public.cancel_board_image(uuid)
+grant execute on function public.claim_board_image_cancellation(uuid, uuid)
+to authenticated;
+grant execute on function public.complete_board_image_cancellation(uuid, uuid)
 to authenticated;
 grant execute on function public.delete_board_image_record(uuid)
 to authenticated;

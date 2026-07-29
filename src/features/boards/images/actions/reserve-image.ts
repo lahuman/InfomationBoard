@@ -2,11 +2,9 @@
 
 import { z } from "zod";
 import { requireUser } from "@/features/auth/require-user";
-import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   ACCEPTED_IMAGE_MIME_TYPES,
-  IMAGE_BUCKET,
   IMAGE_FILE_LIMIT_BYTES,
 } from "../model";
 import { cleanupExpiredBoardImages } from "../storage";
@@ -31,8 +29,6 @@ const reservedRowSchema = z
   })
   .strict();
 
-const signedTokenSchema = z.object({ token: z.string().min(1) });
-
 const INVALID_MESSAGE = "업로드할 이미지를 확인해 주세요.";
 const UNAVAILABLE_MESSAGE =
   "이미지 업로드를 준비하지 못했습니다. 잠시 후 다시 시도해 주세요.";
@@ -49,7 +45,6 @@ export type ReserveBoardImageResult =
       status: "reserved";
       attachmentId: string;
       path: string;
-      token: string;
     }
   | {
       status: "error";
@@ -166,35 +161,9 @@ export async function reserveBoardImage(
     };
   }
 
-  let signedResult;
-  try {
-    signedResult = await createAdminSupabaseClient().storage
-      .from(IMAGE_BUCKET)
-      .createSignedUploadUrl(reserved.storage_path, { upsert: false });
-  } catch {
-    signedResult = null;
-  }
-
-  const signed = signedTokenSchema.safeParse(signedResult?.data);
-  if (!signedResult || signedResult.error || !signed.success) {
-    try {
-      await supabase.rpc("cancel_board_image", {
-        p_attachment_id: reserved.id,
-      });
-    } catch {
-      // Expiry cleanup remains the fallback when cancellation is unavailable.
-    }
-    return {
-      status: "error",
-      code: "unavailable",
-      message: UNAVAILABLE_MESSAGE,
-    };
-  }
-
   return {
     status: "reserved",
     attachmentId: reserved.id,
     path: reserved.storage_path,
-    token: signed.data.token,
   };
 }

@@ -51,9 +51,8 @@ export type UploadBoardImageResult =
 type BrowserUploadClient = {
   storage: {
     from(bucket: string): {
-      uploadToSignedUrl(
+      upload(
         path: string,
-        token: string,
         file: File,
         options: { contentType: string; upsert: false },
       ): PromiseLike<{ error: unknown }>;
@@ -126,22 +125,28 @@ export async function uploadBoardImage(
   const invalid = validationError(input);
   if (invalid) return invalid;
 
-  const reserved = await actions.reserveAction({
-    boardId: input.boardId,
-    originalFilename: input.file.name,
-    mimeType: input.file.type,
-    sizeBytes: input.file.size,
-  });
+  let reserved;
+  try {
+    reserved = await actions.reserveAction({
+      boardId: input.boardId,
+      originalFilename: input.file.name,
+      mimeType: input.file.type,
+      sizeBytes: input.file.size,
+    });
+  } catch {
+    return {
+      status: "error",
+      message: "이미지 업로드를 준비하지 못했습니다. 다시 시도해 주세요.",
+    };
+  }
   if (reserved.status !== "reserved") return reserved;
 
-  const supabase = createClient();
   let upload;
   try {
-    upload = await supabase.storage
+    upload = await createClient().storage
       .from(IMAGE_BUCKET)
-      .uploadToSignedUrl(
+      .upload(
         reserved.path,
-        reserved.token,
         input.file,
         {
           contentType: input.file.type,
@@ -167,8 +172,15 @@ export async function uploadBoardImage(
     };
   }
 
-  return actions.finalizeAction({
-    boardId: input.boardId,
-    attachmentId: reserved.attachmentId,
-  });
+  try {
+    return await actions.finalizeAction({
+      boardId: input.boardId,
+      attachmentId: reserved.attachmentId,
+    });
+  } catch {
+    return {
+      status: "error",
+      message: "이미지 업로드 상태를 확인하지 못했습니다. 다시 시도해 주세요.",
+    };
+  }
 }

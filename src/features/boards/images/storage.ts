@@ -11,10 +11,15 @@ import {
   IMAGE_FILE_LIMIT_BYTES,
 } from "./model";
 
-const expiredRowSchema = z
+const cleanupCandidateSchema = z
+  .object({ id: z.uuid(), board_id: z.uuid() })
+  .strict();
+
+const cancellationClaimSchema = z
   .object({
     id: z.uuid(),
     storage_path: z.string().min(1),
+    state: z.literal("cancelling"),
   })
   .strict();
 
@@ -27,6 +32,8 @@ const storedImageMimeTypes = {
   string,
   (typeof ACCEPTED_IMAGE_MIME_TYPES)[number]
 >;
+
+type AuthenticatedClient = SupabaseClient<Database>;
 
 export class InvalidStoredImageError extends Error {
   constructor() {
@@ -47,28 +54,24 @@ export type VerifiedStoredImage = {
   mimeType: (typeof ACCEPTED_IMAGE_MIME_TYPES)[number];
 };
 
-export type ExpiredBoardImageCleanupResult =
-  | { ok: true }
-  | { ok: false };
+export type BoardImageCleanupResult = { ok: true } | { ok: false };
+
+function applicationErrorMessage(error: unknown): string | null {
+  if (!error || typeof error !== "object") return null;
+  const record = error as Record<string, unknown>;
+  return record.code === "P0001" && typeof record.message === "string"
+    ? record.message
+    : null;
+}
 
 export function isMissingStorageObjectError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
-
   const record = error as Record<string, unknown>;
-  const status = record.statusCode ?? record.status;
   return (
-    status === 404 ||
-    status === "404" ||
-    (typeof record.message === "string" &&
-      record.message.toLowerCase().includes("not found"))
+    record.name === "StorageApiError" &&
+    record.status === 404 &&
+    record.message === "Object not found"
   );
-}
-
-function isAlreadyAbsentRpcError(error: unknown): boolean {
-  if (!error || typeof error !== "object") return false;
-
-  const record = error as Record<string, unknown>;
-  return record.code === "P0001" && record.message === "image_not_found";
 }
 
 export async function verifyStoredImage(
@@ -113,7 +116,6 @@ export async function verifyStoredImage(
         metadata.format as keyof typeof storedImageMimeTypes
       ];
     if (!mimeType) throw new InvalidStoredImageError();
-
     return { bytes, mimeType };
   } catch (error) {
     if (error instanceof InvalidStoredImageError) throw error;
@@ -121,61 +123,110 @@ export async function verifyStoredImage(
   }
 }
 
-export async function cleanupExpiredBoardImages(
-  ownerId: string,
-  authenticatedClient: SupabaseClient<Database>,
-): Promise<ExpiredBoardImageCleanupResult> {
-  if (!z.uuid().safeParse(ownerId).success) return { ok: false };
+export async function cancelBoardImageReservation(
+  boardId: string,
+  attachmentId: string,
+  authenticatedClient: AuthenticatedClient,
+): Promise<BoardImageCleanupResult> {
+  if (
+    !z.uuid().safeParse(boardId).success ||
+    !z.uuid().safeParse(attachmentId).success
+  ) {
+    return { ok: false };
+  }
 
-  const admin = createAdminSupabaseClient();
-
-  let expiredResult;
+  let claimResult;
   try {
-    expiredResult = await admin
-      .from("attachments")
-      .select("id, storage_path")
-      .eq("owner_id", ownerId)
-      .eq("state", "reserved")
-      .lt("reservation_expires_at", new Date().toISOString());
+    claimResult = await authenticatedClient.rpc(
+      "claim_board_image_cancellation",
+      { p_board_id: boardId, p_attachment_id: attachmentId },
+    );
   } catch {
     return { ok: false };
   }
 
-  if (expiredResult.error || !expiredResult.data) return { ok: false };
+  if (claimResult.error) {
+    return applicationErrorMessage(claimResult.error) === "image_not_found"
+      ? { ok: true }
+      : { ok: false };
+  }
 
-  const expiredRows = z.array(expiredRowSchema).safeParse(expiredResult.data);
-  if (!expiredRows.success) return { ok: false };
+  const claims = z
+    .array(cancellationClaimSchema)
+    .length(1)
+    .safeParse(claimResult.data);
+  const claim = claims.success ? claims.data.at(0) : undefined;
+  if (!claim || claim.id !== attachmentId) return { ok: false };
 
-  for (const row of expiredRows.data) {
-    let removeResult;
-    try {
-      removeResult = await admin.storage
-        .from(IMAGE_BUCKET)
-        .remove([row.storage_path]);
-    } catch {
-      return { ok: false };
-    }
-    if (
-      removeResult.error &&
-      !isMissingStorageObjectError(removeResult.error)
-    ) {
-      return { ok: false };
-    }
+  let removeResult;
+  try {
+    removeResult = await createAdminSupabaseClient()
+      .storage.from(IMAGE_BUCKET)
+      .remove([claim.storage_path]);
+  } catch {
+    return { ok: false };
+  }
 
-    let cancelResult;
-    try {
-      cancelResult = await authenticatedClient.rpc("cancel_board_image", {
-        p_attachment_id: row.id,
-      });
-    } catch {
-      return { ok: false };
-    }
-    if (
-      cancelResult.error &&
-      !isAlreadyAbsentRpcError(cancelResult.error)
-    ) {
-      return { ok: false };
-    }
+  if (
+    removeResult.error &&
+    !isMissingStorageObjectError(removeResult.error)
+  ) {
+    return { ok: false };
+  }
+
+  let completeResult;
+  try {
+    completeResult = await authenticatedClient.rpc(
+      "complete_board_image_cancellation",
+      { p_board_id: boardId, p_attachment_id: attachmentId },
+    );
+  } catch {
+    return { ok: false };
+  }
+
+  if (
+    completeResult.error &&
+    applicationErrorMessage(completeResult.error) !== "image_not_found"
+  ) {
+    return { ok: false };
+  }
+
+  return { ok: true };
+}
+
+export async function cleanupExpiredBoardImages(
+  ownerId: string,
+  authenticatedClient: AuthenticatedClient,
+  now = new Date(),
+): Promise<BoardImageCleanupResult> {
+  if (!z.uuid().safeParse(ownerId).success) return { ok: false };
+
+  let candidatesResult;
+  try {
+    candidatesResult = await createAdminSupabaseClient()
+      .from("attachments")
+      .select("id, board_id")
+      .eq("owner_id", ownerId)
+      .or(
+        `state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.${now.toISOString()})`,
+      );
+  } catch {
+    return { ok: false };
+  }
+
+  if (candidatesResult.error || !candidatesResult.data) return { ok: false };
+  const candidates = z
+    .array(cleanupCandidateSchema)
+    .safeParse(candidatesResult.data);
+  if (!candidates.success) return { ok: false };
+
+  for (const candidate of candidates.data) {
+    const cleanup = await cancelBoardImageReservation(
+      candidate.board_id,
+      candidate.id,
+      authenticatedClient,
+    );
+    if (!cleanup.ok) return { ok: false };
   }
 
   return { ok: true };

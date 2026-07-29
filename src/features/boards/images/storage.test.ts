@@ -1,13 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   InvalidStoredImageError,
+  StoredImageUnavailableError,
+  cancelBoardImageReservation,
   cleanupExpiredBoardImages,
+  isMissingStorageObjectError,
   verifyStoredImage,
 } from "./storage";
 
 const ownerId = "10000000-0000-4000-8000-000000000001";
+const boardId = "20000000-0000-4000-8000-000000000002";
 const attachmentId = "30000000-0000-4000-8000-000000000003";
-const storagePath = `${ownerId}/20000000-0000-4000-8000-000000000002/${attachmentId}`;
+const storagePath = `${ownerId}/${boardId}/${attachmentId}`;
 const pngBytes = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
@@ -17,15 +21,13 @@ const mocks = vi.hoisted(() => ({
   from: vi.fn(),
   select: vi.fn(),
   ownerEq: vi.fn(),
-  stateEq: vi.fn(),
-  expiresLt: vi.fn(),
+  candidatesOr: vi.fn(),
   storageFrom: vi.fn(),
   download: vi.fn(),
   remove: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
-
 vi.mock("@/lib/supabase/admin", () => ({
   createAdminSupabaseClient: vi.fn(() => ({
     from: mocks.from,
@@ -37,9 +39,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocks.from.mockReturnValue({ select: mocks.select });
   mocks.select.mockReturnValue({ eq: mocks.ownerEq });
-  mocks.ownerEq.mockReturnValue({ eq: mocks.stateEq });
-  mocks.stateEq.mockReturnValue({ lt: mocks.expiresLt });
-  mocks.expiresLt.mockResolvedValue({ data: [], error: null });
+  mocks.ownerEq.mockReturnValue({ or: mocks.candidatesOr });
+  mocks.candidatesOr.mockResolvedValue({ data: [], error: null });
   mocks.storageFrom.mockReturnValue({
     download: mocks.download,
     remove: mocks.remove,
@@ -51,24 +52,81 @@ beforeEach(() => {
   mocks.remove.mockResolvedValue({ data: [], error: null });
 });
 
-describe("verifyStoredImage", () => {
-  it("downloads from the private image bucket and returns the decoded MIME and exact bytes", async () => {
-    const verified = await verifyStoredImage(storagePath);
+describe("Storage object errors", () => {
+  it("recognizes only the exact object-missing StorageApiError", () => {
+    expect(
+      isMissingStorageObjectError({
+        name: "StorageApiError",
+        status: 404,
+        message: "Object not found",
+      }),
+    ).toBe(true);
 
+    expect(
+      isMissingStorageObjectError({
+        name: "StorageApiError",
+        status: 404,
+        message: "Bucket not found",
+      }),
+    ).toBe(false);
+    expect(
+      isMissingStorageObjectError({
+        name: "StorageApiError",
+        status: 404,
+        message: "Route not found",
+      }),
+    ).toBe(false);
+    expect(
+      isMissingStorageObjectError({
+        name: "StorageApiError",
+        status: 403,
+        message: "Object not found",
+      }),
+    ).toBe(false);
+    expect(
+      isMissingStorageObjectError({
+        statusCode: "404",
+        message: "Object not found",
+      }),
+    ).toBe(false);
+  });
+});
+
+describe("verifyStoredImage", () => {
+  it("returns the decoded MIME and exact downloaded bytes", async () => {
+    const verified = await verifyStoredImage(storagePath);
     expect(verified.mimeType).toBe("image/png");
     expect(Buffer.from(verified.bytes)).toEqual(pngBytes);
     expect(mocks.download).toHaveBeenCalledWith(storagePath);
   });
 
-  it("rejects a missing object, malformed bytes, and bytes above 10 MB", async () => {
+  it("treats only exact object-missing as an invalid upload", async () => {
     mocks.download.mockResolvedValueOnce({
       data: null,
-      error: { statusCode: "404", message: "Object not found" },
+      error: {
+        name: "StorageApiError",
+        status: 404,
+        message: "Object not found",
+      },
     });
     await expect(verifyStoredImage(storagePath)).rejects.toBeInstanceOf(
       InvalidStoredImageError,
     );
 
+    mocks.download.mockResolvedValueOnce({
+      data: null,
+      error: {
+        name: "StorageApiError",
+        status: 404,
+        message: "Bucket not found",
+      },
+    });
+    await expect(verifyStoredImage(storagePath)).rejects.toBeInstanceOf(
+      StoredImageUnavailableError,
+    );
+  });
+
+  it("rejects malformed bytes and bytes above 10 MB", async () => {
     mocks.download.mockResolvedValueOnce({
       data: new Blob([new Uint8Array([1, 2, 3, 4])]),
       error: null,
@@ -87,70 +145,122 @@ describe("verifyStoredImage", () => {
   });
 });
 
-describe("cleanupExpiredBoardImages", () => {
-  it("removes each expired owned object before cancelling its reservation", async () => {
+describe("cancelBoardImageReservation", () => {
+  it("claims before removing and completes only after removal", async () => {
     const calls: string[] = [];
-    const rpc = vi.fn(async () => {
-      calls.push("cancel");
+    const rpc = vi.fn(async (name: string) => {
+      calls.push(name);
+      if (name === "claim_board_image_cancellation") {
+        return {
+          data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
+          error: null,
+        };
+      }
       return { data: undefined, error: null };
     });
-    mocks.remove.mockImplementation(async () => {
+    mocks.remove.mockImplementationOnce(async () => {
       calls.push("remove");
       return { data: [], error: null };
     });
-    mocks.expiresLt.mockResolvedValue({
-      data: [{ id: attachmentId, storage_path: storagePath }],
-      error: null,
-    });
 
     await expect(
-      cleanupExpiredBoardImages(ownerId, { rpc } as never),
+      cancelBoardImageReservation(boardId, attachmentId, { rpc } as never),
     ).resolves.toEqual({ ok: true });
 
-    expect(mocks.ownerEq).toHaveBeenCalledWith("owner_id", ownerId);
-    expect(mocks.stateEq).toHaveBeenCalledWith("state", "reserved");
-    expect(mocks.remove).toHaveBeenCalledWith([storagePath]);
-    expect(rpc).toHaveBeenCalledWith("cancel_board_image", {
+    expect(rpc).toHaveBeenNthCalledWith(1, "claim_board_image_cancellation", {
+      p_board_id: boardId,
       p_attachment_id: attachmentId,
     });
-    expect(calls).toEqual(["remove", "cancel"]);
+    expect(mocks.remove).toHaveBeenCalledWith([storagePath]);
+    expect(rpc).toHaveBeenNthCalledWith(2, "complete_board_image_cancellation", {
+      p_board_id: boardId,
+      p_attachment_id: attachmentId,
+    });
+    expect(calls).toEqual([
+      "claim_board_image_cancellation",
+      "remove",
+      "complete_board_image_cancellation",
+    ]);
   });
 
-  it("fails closed and retains quota when object removal fails", async () => {
-    const rpc = vi.fn();
-    mocks.expiresLt.mockResolvedValue({
-      data: [{ id: attachmentId, storage_path: storagePath }],
+  it("keeps the cancelling row and quota when removal fails", async () => {
+    const rpc = vi.fn(async () => ({
+      data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
       error: null,
-    });
-    mocks.remove.mockResolvedValue({
+    }));
+    mocks.remove.mockResolvedValueOnce({
       data: null,
-      error: { message: "storage unavailable" },
+      error: { name: "StorageApiError", status: 503, message: "Unavailable" },
     });
 
     await expect(
-      cleanupExpiredBoardImages(ownerId, { rpc } as never),
+      cancelBoardImageReservation(boardId, attachmentId, { rpc } as never),
     ).resolves.toEqual({ ok: false });
 
-    expect(rpc).not.toHaveBeenCalled();
+    expect(rpc).toHaveBeenCalledTimes(1);
   });
 
-  it("cancels the row when a previous attempt already removed the object", async () => {
-    const rpc = vi.fn(async () => ({ data: undefined, error: null }));
-    mocks.expiresLt.mockResolvedValue({
-      data: [{ id: attachmentId, storage_path: storagePath }],
-      error: null,
-    });
-    mocks.remove.mockResolvedValue({
+  it("continues completion only for exact object-missing", async () => {
+    const rpc = vi.fn(async (name: string) =>
+      name === "claim_board_image_cancellation"
+        ? {
+            data: [{ id: attachmentId, storage_path: storagePath, state: "cancelling" }],
+            error: null,
+          }
+        : { data: undefined, error: null },
+    );
+    mocks.remove.mockResolvedValueOnce({
       data: null,
-      error: { statusCode: "404", message: "Object not found" },
+      error: {
+        name: "StorageApiError",
+        status: 404,
+        message: "Object not found",
+      },
     });
 
     await expect(
-      cleanupExpiredBoardImages(ownerId, { rpc } as never),
+      cancelBoardImageReservation(boardId, attachmentId, { rpc } as never),
+    ).resolves.toEqual({ ok: true });
+    expect(rpc).toHaveBeenLastCalledWith(
+      "complete_board_image_cancellation",
+      { p_board_id: boardId, p_attachment_id: attachmentId },
+    );
+  });
+});
+
+describe("cleanupExpiredBoardImages", () => {
+  it("claims expired reserved and existing cancelling rows through the same cleanup path", async () => {
+    const cancellingId = "40000000-0000-4000-8000-000000000004";
+    const cancellingPath = `${ownerId}/${boardId}/${cancellingId}`;
+    mocks.candidatesOr.mockResolvedValue({
+      data: [
+        { id: attachmentId, board_id: boardId },
+        { id: cancellingId, board_id: boardId },
+      ],
+      error: null,
+    });
+    const rpc = vi.fn(async (name: string, args: { p_attachment_id: string }) => {
+      if (name === "claim_board_image_cancellation") {
+        return {
+          data: [{
+            id: args.p_attachment_id,
+            storage_path: args.p_attachment_id === attachmentId ? storagePath : cancellingPath,
+            state: "cancelling",
+          }],
+          error: null,
+        };
+      }
+      return { data: undefined, error: null };
+    });
+
+    await expect(
+      cleanupExpiredBoardImages(ownerId, { rpc } as never, new Date("2026-07-29T10:00:00.000Z")),
     ).resolves.toEqual({ ok: true });
 
-    expect(rpc).toHaveBeenCalledWith("cancel_board_image", {
-      p_attachment_id: attachmentId,
-    });
+    expect(mocks.candidatesOr).toHaveBeenCalledWith(
+      `state.eq.cancelling,and(state.eq.reserved,reservation_expires_at.lt.2026-07-29T10:00:00.000Z)`,
+    );
+    expect(mocks.remove).toHaveBeenCalledTimes(2);
+    expect(rpc).toHaveBeenCalledTimes(4);
   });
 });
