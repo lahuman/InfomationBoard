@@ -15,6 +15,10 @@ vi.mock("next/navigation", () => ({
   useRouter: () => routerMocks,
 }));
 
+vi.mock("./markdown-editor/milkdown-editor", () => ({
+  createMilkdownEditorController: vi.fn(() => new Promise(() => {})),
+}));
+
 const initialBoard = {
   id: "30000000-0000-4000-8000-000000000003",
   slug: "summer-night-market",
@@ -83,6 +87,36 @@ it("autosaves edited content after 750 ms", async () => {
   );
   expect(screen.getByText("저장됨")).toBeVisible();
   expect(window.localStorage.length).toBe(0);
+});
+
+it("autosaves Markdown emitted by the rich/source editor", async () => {
+  const update = vi.fn(async (): Promise<UpdateBoardResult> => ({
+    status: "saved",
+    revision: 3,
+    updatedAt: "2026-07-28T10:01:00.000Z",
+  }));
+  render(
+    <BoardEditor
+      {...publicationProps}
+      board={initialBoard}
+      deleteBoardAction={vi.fn()}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+  fireEvent.change(screen.getByLabelText("본문 Markdown 원문"), {
+    target: { value: "## 프로그램\n\n1. 얼글 브로치 만들기" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({
+      contentMarkdown: "## 프로그램\n\n1. 얼글 브로치 만들기",
+    }),
+  );
 });
 
 it("uses the publication revision for the next autosave", async () => {
@@ -173,6 +207,7 @@ it("preserves local input when the server reports a conflict", async () => {
       status: "conflict",
       serverBoard: {
         ...initialBoard,
+        contentMarkdown: "# 서버 본문",
         title: "서버 제목",
         revision: 4,
       },
@@ -197,6 +232,44 @@ it("preserves local input when the server reports a conflict", async () => {
   expect(screen.getByText("저장 충돌")).toBeVisible();
   expect(screen.getByRole("button", { name: "서버 내용 불러오기" })).toBeVisible();
   expect(window.localStorage.length).toBe(1);
+
+  fireEvent.click(screen.getByRole("button", { name: "서버 내용 불러오기" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    "# 서버 본문",
+  );
+});
+
+it("synchronizes a restored recovery copy with Markdown source mode", () => {
+  window.localStorage.setItem(
+    `informationboard:recovery:${initialBoard.id}`,
+    JSON.stringify({
+      savedAt: "2026-07-28T10:05:00.000Z",
+      revision: 2,
+      draft: {
+        title: "복구 제목",
+        summary: "복구 요약",
+        contentMarkdown: "# 복구 본문",
+        theme: initialBoard.theme,
+      },
+    }),
+  );
+  render(
+    <BoardEditor
+      {...publicationProps}
+      board={initialBoard}
+      deleteBoardAction={vi.fn()}
+      updateBoardAction={vi.fn()}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "복구하기" }));
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    "# 복구 본문",
+  );
 });
 
 it("coalesces edits made while a save request is in flight", async () => {

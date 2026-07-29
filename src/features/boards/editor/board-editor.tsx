@@ -11,6 +11,7 @@ import type { PublicationInput, UpdateBoardInput } from "../schema";
 import type { UpdateBoardResult } from "../actions/update-board";
 import { PublicationSettings } from "../publication/publication-settings";
 import type { EditorBoard, EditorDraft } from "./editor-board";
+import { MarkdownContentEditor } from "./markdown-editor/markdown-content-editor";
 import {
   clearRecoveryCopy,
   loadRecoveryCopy,
@@ -349,14 +350,11 @@ export function BoardEditor({
             value={draft.summary}
           />
 
-          <label htmlFor="board-content">본문 Markdown</label>
-          <textarea
+          <label id="board-content-label">본문</label>
+          <MarkdownContentEditor
             id="board-content"
             maxLength={200_000}
-            onChange={(event) =>
-              updateDraft({ contentMarkdown: event.currentTarget.value })
-            }
-            rows={22}
+            onChange={(contentMarkdown) => updateDraft({ contentMarkdown })}
             value={draft.contentMarkdown}
           />
 
