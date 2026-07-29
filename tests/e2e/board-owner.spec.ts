@@ -53,6 +53,7 @@ test.describe("authenticated board owner workflow", () => {
       "pre-wrap",
     );
 
+    await page.getByRole("tab", { name: "리치 텍스트" }).click();
     await page.setViewportSize({ width: 375, height: 900 });
     const editorPanel = page.locator(".editor-form-panel");
     const toolbar = editorPanel.locator(".markdown-toolbar");
