@@ -17,6 +17,30 @@ type PublicBoardViewProps = {
   board: PublicBoard;
 };
 
+export function PublicBoardSheet({ board }: PublicBoardViewProps) {
+  return (
+    <article className="public-board-sheet">
+      <header className="public-board-hero">
+        <p className="public-board-kicker">{templateLabels[board.template]}</p>
+        <h1>{board.title}</h1>
+        {board.summary ? (
+          <p
+            className="public-board-summary"
+            data-testid="public-board-summary"
+          >
+            {board.summary}
+          </p>
+        ) : null}
+      </header>
+
+      <BoardMarkdown
+        className="public-board-content"
+        markdown={board.contentMarkdown}
+      />
+    </article>
+  );
+}
+
 export function PublicBoardView({ board }: PublicBoardViewProps) {
   return (
     <main
@@ -29,25 +53,7 @@ export function PublicBoardView({ board }: PublicBoardViewProps) {
         <p>공개 안내판</p>
       </header>
 
-      <article className="public-board-sheet">
-        <header className="public-board-hero">
-          <p className="public-board-kicker">{templateLabels[board.template]}</p>
-          <h1>{board.title}</h1>
-          {board.summary ? (
-            <p
-              className="public-board-summary"
-              data-testid="public-board-summary"
-            >
-              {board.summary}
-            </p>
-          ) : null}
-        </header>
-
-        <BoardMarkdown
-          className="public-board-content"
-          markdown={board.contentMarkdown}
-        />
-      </article>
+      <PublicBoardSheet board={board} />
 
       <footer className="public-board-footer">
         <p>게시된 안내판</p>

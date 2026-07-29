@@ -1,6 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
-import { PublicBoardView } from "./public-board-view";
+import { PublicBoardSheet, PublicBoardView } from "./public-board-view";
 
 const board = {
   id: "30000000-0000-4000-8000-000000000003",
@@ -36,6 +36,8 @@ describe("PublicBoardView", () => {
       screen.getByRole("heading", { name: "운영 시간", level: 2 }),
     ).toBeVisible();
     expect(screen.queryByText("alert('x')")).not.toBeInTheDocument();
+    expect(screen.getByText("공개 안내판")).toBeVisible();
+    expect(screen.getByText("게시된 안내판")).toBeVisible();
 
     expect(screen.getByRole("main")).toHaveClass(
       "theme-coral",
@@ -47,5 +49,18 @@ describe("PublicBoardView", () => {
   it("keeps empty summaries out of the document", () => {
     render(<PublicBoardView board={{ ...board, summary: "" }} />);
     expect(screen.queryByTestId("public-board-summary")).not.toBeInTheDocument();
+  });
+
+  it("renders the reusable board sheet without publication chrome", () => {
+    render(<PublicBoardSheet board={board} />);
+
+    expect(
+      screen.getByRole("heading", { name: board.title, level: 1 }),
+    ).toBeVisible();
+    expect(
+      screen.getByRole("heading", { name: "운영 시간", level: 2 }),
+    ).toBeVisible();
+    expect(screen.queryByText("공개 안내판")).not.toBeInTheDocument();
+    expect(screen.queryByText("게시된 안내판")).not.toBeInTheDocument();
   });
 });
