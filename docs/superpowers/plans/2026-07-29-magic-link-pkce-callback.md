@@ -4,7 +4,7 @@
 
 **Goal:** Make Supabase's default emailed magic link create a server-side session for both first-time signup and returning-user login before redirecting to the requested internal page.
 
-**Architecture:** Route magic-link and Google PKCE redirects through the existing `/auth/callback` handler. Build that callback URL from the configured application origin and a `safeNextPath` result, then let the callback exchange Supabase's authorization code for cookie-backed session credentials.
+**Architecture:** Route magic-link and Google PKCE redirects through the exact allowlisted `/auth/callback` URL. Store the `safeNextPath` result in a short-lived, callback-path-only `HttpOnly` cookie, then let the callback exchange Supabase's authorization code, consume the destination, and issue cookie-backed session credentials.
 
 **Tech Stack:** Next.js 16 App Router, TypeScript 6, Supabase SSR 0.12, Supabase JS 2.110, Vitest 4, Playwright 1.62.
 
@@ -15,6 +15,7 @@
 - Do not expose provider errors, authorization codes, access tokens, or refresh tokens.
 - Use the hosted project's default Magic Link email template; custom SMTP and custom email templates are not required.
 - Keep `/auth/confirm` for direct token-hash verification and existing live E2E setup.
+- Keep callback URLs free of query parameters so they exactly match the hosted redirect allowlist.
 - Stop and report if the same error occurs five or more times.
 
 ---
@@ -23,6 +24,8 @@
 
 - `src/features/auth/actions.test.ts`: regression coverage for the callback URL passed to Supabase and unsafe `next` normalization.
 - `src/features/auth/actions.ts`: shared callback URL construction used by magic-link and Google requests.
+- `src/features/auth/next-path-cookie.ts`: shared destination cookie name and hardened options.
+- `src/app/auth/callback/route.ts`: consume and clear the remembered destination after code exchange.
 - `src/app/auth/callback/route.test.ts`: describe the route as the shared PKCE callback rather than a Google-only endpoint.
 - `README.md`: document the default-template callback flow and optional token-hash endpoint accurately.
 
@@ -41,8 +44,7 @@
 Replace the expected direct dashboard URL with the callback URL:
 
 ```ts
-emailRedirectTo:
-  "http://localhost:3000/auth/callback?next=%2Fdashboard",
+emailRedirectTo: "http://localhost:3000/auth/callback",
 ```
 
 - [x] **Step 2: Add a failing unsafe-destination test**
@@ -61,8 +63,7 @@ it("replaces an external destination in the callback with the dashboard", async 
     email: "owner@example.com",
     options: {
       shouldCreateUser: true,
-      emailRedirectTo:
-        "http://localhost:3000/auth/callback?next=%2Fdashboard",
+      emailRedirectTo: "http://localhost:3000/auth/callback",
     },
   });
 });
@@ -76,17 +77,20 @@ Run:
 npm run test:run -- src/features/auth/actions.test.ts
 ```
 
-Expected: both callback URL expectations fail because production still passes
-`http://localhost:3000/dashboard` to `signInWithOtp`.
+Expected: the callback URL and destination-cookie expectations fail because
+production still passes `http://localhost:3000/dashboard` directly.
 
-### Task 2: Route Magic Links Through the Shared PKCE Callback
+### Task 2: Route Magic Links Through the Exact PKCE Callback
 
 **Files:**
 - Modify: `src/features/auth/actions.ts:15-88`
+- Create: `src/features/auth/next-path-cookie.ts`
+- Modify: `src/app/auth/callback/route.ts`
 - Test: `src/features/auth/actions.test.ts`
 
 **Interfaces:**
-- Produces: `authCallbackUrl(appUrl: string, next: string): string` as a private module helper.
+- Produces: `authCallbackUrl(appUrl: string): string` as a private module helper.
+- Produces: a ten-minute hardened destination cookie shared with the callback.
 - Consumes: normalized `next` values from `safeNextPath`.
 
 - [x] **Step 1: Add a focused private callback builder**
@@ -94,10 +98,8 @@ Expected: both callback URL expectations fail because production still passes
 Add below `emailSchema`:
 
 ```ts
-function authCallbackUrl(appUrl: string, next: string) {
-  const callbackUrl = new URL("/auth/callback", appUrl);
-  callbackUrl.searchParams.set("next", next);
-  return callbackUrl.toString();
+function authCallbackUrl(appUrl: string) {
+  return new URL("/auth/callback", appUrl).toString();
 }
 ```
 
@@ -106,16 +108,17 @@ function authCallbackUrl(appUrl: string, next: string) {
 In `requestMagicLink`, replace the direct destination with:
 
 ```ts
-emailRedirectTo: authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next),
+emailRedirectTo: authCallbackUrl(env.NEXT_PUBLIC_APP_URL),
 ```
 
 In `signInWithGoogle`, replace the local `URL` construction with:
 
 ```ts
-const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next);
+const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL);
 ```
 
-and pass `redirectTo: callbackUrl`.
+Pass `redirectTo: callbackUrl`, remember the validated destination only after
+Supabase accepts the request, and have `/auth/callback` consume and clear it.
 
 - [x] **Step 3: Run the focused tests and verify GREEN**
 
@@ -165,7 +168,8 @@ describe("PKCE auth callback", () => {
 Replace the required custom template instruction with:
 
 ```md
-- Magic Link uses Supabase's default email template and redirects through
+- Email signup and returning-user login retain the `{{ .ConfirmationURL }}` link
+  in Supabase's default Magic Link template and redirect through the allowlisted
   `<application-origin>/auth/callback`, where the PKCE authorization code is
   exchanged for a server-side session.
 - `/auth/confirm` remains available for direct token-hash verification in live
@@ -240,6 +244,6 @@ Expected: only the design, plan, auth implementation, regression tests, and
 README documentation are part of this goal. Commit with:
 
 ```bash
-git add docs/superpowers/plans/2026-07-29-magic-link-pkce-callback.md README.md src/features/auth/actions.ts src/features/auth/actions.test.ts src/app/auth/callback/route.test.ts
+git add docs/superpowers/specs/2026-07-29-magic-link-pkce-callback-design.md docs/superpowers/plans/2026-07-29-magic-link-pkce-callback.md README.md src/features/auth/next-path-cookie.ts src/features/auth/actions.ts src/features/auth/actions.test.ts src/app/auth/callback/route.ts src/app/auth/callback/route.test.ts
 git commit -m "fix: complete magic link PKCE login"
 ```

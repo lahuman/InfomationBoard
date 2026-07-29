@@ -1,10 +1,15 @@
 "use server";
 
 import { redirect } from "next/navigation";
+import { cookies } from "next/headers";
 import { z } from "zod";
 import { getServerEnv } from "@/lib/env/server";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import { authErrorMessage } from "./messages";
+import {
+  AUTH_NEXT_COOKIE_NAME,
+  authNextCookieOptions,
+} from "./next-path-cookie";
 import { safeNextPath } from "./redirect";
 
 export type AuthActionState = {
@@ -14,10 +19,17 @@ export type AuthActionState = {
 
 const emailSchema = z.email();
 
-function authCallbackUrl(appUrl: string, next: string) {
-  const callbackUrl = new URL("/auth/callback", appUrl);
-  callbackUrl.searchParams.set("next", next);
-  return callbackUrl.toString();
+function authCallbackUrl(appUrl: string) {
+  return new URL("/auth/callback", appUrl).toString();
+}
+
+async function rememberAuthNextPath(next: string, appUrl: string) {
+  const cookieStore = await cookies();
+  cookieStore.set(
+    AUTH_NEXT_COOKIE_NAME,
+    next,
+    authNextCookieOptions(new URL(appUrl).protocol === "https:"),
+  );
 }
 
 export async function requestMagicLink(
@@ -43,7 +55,7 @@ export async function requestMagicLink(
       email: parsedEmail.data,
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next),
+        emailRedirectTo: authCallbackUrl(env.NEXT_PUBLIC_APP_URL),
       },
     }));
   } catch {
@@ -60,6 +72,8 @@ export async function requestMagicLink(
     };
   }
 
+  await rememberAuthNextPath(next, env.NEXT_PUBLIC_APP_URL);
+
   return {
     status: "success",
     message:
@@ -70,7 +84,7 @@ export async function requestMagicLink(
 export async function signInWithGoogle(formData: FormData): Promise<void> {
   const next = safeNextPath(String(formData.get("next") ?? ""));
   const env = getServerEnv();
-  const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next);
+  const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL);
 
   const supabase = await createServerSupabaseClient();
   let result: Awaited<ReturnType<typeof supabase.auth.signInWithOAuth>>;
@@ -89,6 +103,7 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
     return redirect("/login?error=google");
   }
 
+  await rememberAuthNextPath(next, env.NEXT_PUBLIC_APP_URL);
   return redirect(result.data.url);
 }
 

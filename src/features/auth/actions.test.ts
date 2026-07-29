@@ -7,10 +7,15 @@ import {
 } from "./actions";
 
 const mocks = vi.hoisted(() => ({
+  cookieSet: vi.fn(),
   redirect: vi.fn(),
   signInWithOtp: vi.fn(),
   signInWithOAuth: vi.fn(),
   signOut: vi.fn(),
+}));
+
+vi.mock("next/headers", () => ({
+  cookies: vi.fn(async () => ({ set: mocks.cookieSet })),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -57,10 +62,20 @@ describe("requestMagicLink", () => {
       email: "owner@example.com",
       options: {
         shouldCreateUser: true,
-        emailRedirectTo:
-          "http://localhost:3000/auth/callback?next=%2Fdashboard",
+        emailRedirectTo: "http://localhost:3000/auth/callback",
       },
     });
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      "informationboard-auth-next",
+      "/dashboard",
+      {
+        httpOnly: true,
+        maxAge: 600,
+        path: "/auth/callback",
+        sameSite: "lax",
+        secure: false,
+      },
+    );
     expect(result).toEqual({
       status: "success",
       message:
@@ -79,10 +94,14 @@ describe("requestMagicLink", () => {
       email: "owner@example.com",
       options: {
         shouldCreateUser: true,
-        emailRedirectTo:
-          "http://localhost:3000/auth/callback?next=%2Fdashboard",
+        emailRedirectTo: "http://localhost:3000/auth/callback",
       },
     });
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      "informationboard-auth-next",
+      "/dashboard",
+      expect.any(Object),
+    );
   });
 
   it("rejects invalid email before contacting Supabase", async () => {
@@ -124,9 +143,14 @@ describe("signInWithGoogle", () => {
       provider: "google",
       options: {
         redirectTo:
-          "http://localhost:3000/auth/callback?next=%2Fdashboard",
+          "http://localhost:3000/auth/callback",
       },
     });
+    expect(mocks.cookieSet).toHaveBeenCalledWith(
+      "informationboard-auth-next",
+      "/dashboard",
+      expect.any(Object),
+    );
     expect(mocks.redirect).toHaveBeenCalledWith(
       "https://accounts.google.test/oauth",
     );

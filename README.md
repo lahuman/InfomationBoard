@@ -82,9 +82,11 @@ In Supabase Dashboard, configure:
   - `http://localhost:3000/auth/confirm`
   - `<production-origin>/auth/callback`
   - `<production-origin>/auth/confirm`
-- Magic Link uses Supabase's default email template and redirects through
-  `<application-origin>/auth/callback`, where the PKCE authorization code is
-  exchanged for a server-side session.
+- Email signup and returning-user login both call `signInWithOtp` and use
+  Supabase's default **Magic link or OTP** template. Keep its
+  `{{ .ConfirmationURL }}` link unchanged. Both flows redirect through the exact
+  allowlisted `<application-origin>/auth/callback`, where the PKCE authorization
+  code is exchanged for a server-side session.
 - `/auth/confirm` remains available for direct token-hash verification in live
   tests or an optional custom email template. Custom SMTP/template configuration
   is not required for the default signup and login flow.

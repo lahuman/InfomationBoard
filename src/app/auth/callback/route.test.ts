@@ -20,6 +20,25 @@ beforeEach(() => {
 });
 
 describe("PKCE auth callback", () => {
+  it("uses and clears the remembered internal destination", async () => {
+    const response = await GET(
+      new NextRequest("http://localhost:3000/auth/callback?code=valid", {
+        headers: {
+          cookie: "informationboard-auth-next=/boards/new",
+        },
+      }),
+    );
+
+    expect(response.headers.get("location")).toBe(
+      "http://localhost:3000/boards/new",
+    );
+    expect(response.cookies.get("informationboard-auth-next")).toMatchObject({
+      value: "",
+      maxAge: 0,
+      path: "/auth/callback",
+    });
+  });
+
   it("exchanges a valid code and redirects internally", async () => {
     const response = await GET(
       new NextRequest(
