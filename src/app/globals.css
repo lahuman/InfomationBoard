@@ -1737,6 +1737,44 @@ a {
   margin: 0;
 }
 
+.sample-board-nav {
+  display: flex;
+  min-height: 5.5rem;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  border-bottom: 1px solid var(--foreground);
+  font-size: 0.75rem;
+  font-weight: 800;
+}
+
+.sample-board-nav p {
+  margin: 0;
+}
+
+.sample-board-nav div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.sample-board-nav a {
+  text-underline-offset: 0.25rem;
+}
+
+.sample-board-primary-action {
+  padding: 0.7rem 0.85rem;
+  background: var(--foreground);
+  color: var(--public-surface);
+  text-decoration: none;
+}
+
+.sample-board-nav a:focus-visible {
+  outline: 3px solid var(--public-accent);
+  outline-offset: 3px;
+}
+
 .password-challenge-page {
   position: relative;
   display: grid;
@@ -1881,6 +1919,12 @@ a {
 
   .use-case-grid {
     grid-template-columns: 1fr;
+  }
+
+  .sample-board-nav {
+    align-items: flex-start;
+    flex-direction: column;
+    padding-block: 1rem;
   }
 
   .login-page {
