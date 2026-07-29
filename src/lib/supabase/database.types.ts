@@ -7,11 +7,6 @@ export type Json =
   | Json[]
 
 export type Database = {
-  // Allows to automatically instantiate createClient with right options
-  // instead of createClient<Database, { PostgrestVersion: 'XX' }>(URL, KEY)
-  __InternalSupabase: {
-    PostgrestVersion: "14.5"
-  }
   graphql_public: {
     Tables: {
       [_ in never]: never
@@ -177,9 +172,33 @@ export type Database = {
       [_ in never]: never
     }
     Functions: {
+      cancel_board_image: {
+        Args: { p_attachment_id: string }
+        Returns: undefined
+      }
       clear_password_failures_for_server: {
         Args: { p_anonymous_key_hash: string; p_board_id: string }
         Returns: undefined
+      }
+      delete_board_image_record: {
+        Args: { p_attachment_id: string }
+        Returns: boolean
+      }
+      finalize_board_image: {
+        Args: {
+          p_actual_size_bytes: number
+          p_attachment_id: string
+          p_mime_type: string
+        }
+        Returns: {
+          id: string
+          mime_type: string
+          original_filename: string
+          reservation_expires_at: string
+          size_bytes: number
+          state: string
+          storage_path: string
+        }[]
       }
       get_password_board_for_server: {
         Args: { p_slug: string }
@@ -219,6 +238,22 @@ export type Database = {
         Returns: {
           failed_count: number
           locked_until: string
+        }[]
+      }
+      reserve_board_image: {
+        Args: {
+          p_board_id: string
+          p_mime_type: string
+          p_original_filename: string
+          p_size_bytes: number
+        }
+        Returns: {
+          id: string
+          mime_type: string
+          original_filename: string
+          reservation_expires_at: string
+          size_bytes: number
+          storage_path: string
         }[]
       }
     }

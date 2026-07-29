@@ -74,16 +74,11 @@ select results_eq(
 );
 
 select lives_ok(
-  $$ insert into public.attachments (
-       board_id, owner_id, storage_path, original_filename,
-       mime_type, size_bytes, reservation_expires_at
-     ) values (
+  $$ select * from public.reserve_board_image(
        '30000000-0000-0000-0000-000000000003',
-       '10000000-0000-0000-0000-000000000001',
-       'owner/random-file', 'guide.pdf',
-       'application/pdf', 1024, now() + interval '15 minutes'
+       'owner.png', 'image/png', 1024
      ) $$,
-  'owner can insert attachment metadata'
+  'owner can reserve attachment metadata'
 );
 
 select results_eq(
@@ -136,18 +131,13 @@ select throws_ok(
 );
 
 select throws_ok(
-  $$ insert into public.attachments (
-       board_id, owner_id, storage_path, original_filename,
-       mime_type, size_bytes, reservation_expires_at
-     ) values (
+  $$ select * from public.reserve_board_image(
        '30000000-0000-0000-0000-000000000003',
-       '20000000-0000-0000-0000-000000000002',
-       'other/forged-file', 'forged.pdf',
-       'application/pdf', 1024, now() + interval '15 minutes'
+       'forged.png', 'image/png', 1024
      ) $$,
-  '42501',
-  null,
-  'another user cannot attach metadata to the owner board'
+  'P0001',
+  'image_not_found',
+  'another user cannot reserve metadata for the owner board'
 );
 
 reset role;
