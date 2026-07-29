@@ -1898,8 +1898,14 @@ a {
 }
 
 .use-case {
-  padding: 1.5rem 1rem 1.5rem 0;
   border-bottom: 1px solid var(--line);
+}
+
+.use-case > a {
+  display: block;
+  height: 100%;
+  padding: 1.5rem 1rem 1.5rem 0;
+  text-decoration: none;
 }
 
 .use-case h3 {
@@ -1910,6 +1916,31 @@ a {
 .use-case p {
   max-width: 20rem;
   word-break: keep-all;
+}
+
+.use-case-action {
+  display: inline-block;
+  margin-top: 1rem;
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-decoration: underline;
+  text-underline-offset: 0.25rem;
+  transition: transform 150ms ease;
+}
+
+.use-case > a:hover .use-case-action {
+  transform: translateX(0.25rem);
+}
+
+.use-case > a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 4px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .use-case-action {
+    transition: none;
+  }
 }
 
 @media (max-width: 42rem) {

@@ -1,8 +1,5 @@
-const useCases = [
-  ["01", "매장 안내", "영업시간, 위치, 이용 방법을 한 화면에"],
-  ["02", "행사 안내", "일정, 장소, 준비물을 강한 포스터로"],
-  ["03", "모임 안내", "참여자에게 필요한 내용을 빠짐없이"],
-] as const;
+import Link from "next/link";
+import { SAMPLE_BOARDS } from "@/features/boards/examples/sample-boards";
 
 export function UseCases() {
   return (
@@ -10,11 +7,19 @@ export function UseCases() {
       <p className="section-kicker">USE CASES</p>
       <h2 id="examples-title">필요한 안내를 선명하게</h2>
       <div className="use-case-grid">
-        {useCases.map(([number, title, description]) => (
-          <article key={title} className="use-case">
-            <span aria-hidden="true">{number}</span>
-            <h3>{title}</h3>
-            <p>{description}</p>
+        {SAMPLE_BOARDS.map(({ number, slug, label, description }) => (
+          <article key={slug} className="use-case">
+            <Link
+              href={`/examples/${slug}`}
+              aria-label={`${label} 샘플 보드 보기`}
+            >
+              <span aria-hidden="true">{number}</span>
+              <h3>{label}</h3>
+              <p>{description}</p>
+              <span className="use-case-action" aria-hidden="true">
+                샘플 보드 보기 →
+              </span>
+            </Link>
           </article>
         ))}
       </div>
