@@ -1,5 +1,19 @@
 "use client";
 
+import {
+  Bold,
+  Heading2,
+  Heading3,
+  Italic,
+  Link,
+  List,
+  ListOrdered,
+  Minus,
+  Quote,
+  Redo2,
+  Undo2,
+  type LucideIcon,
+} from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createMilkdownEditorController } from "./milkdown-editor";
 import type {
@@ -23,33 +37,33 @@ const toolbarGroups = [
   [
     "text",
     [
-      ["heading-2", "제목 2"],
-      ["heading-3", "제목 3"],
-      ["bold", "굵게"],
-      ["italic", "기울임"],
+      ["heading-2", "제목 2", Heading2],
+      ["heading-3", "제목 3", Heading3],
+      ["bold", "굵게", Bold],
+      ["italic", "기울임", Italic],
     ],
   ],
-  ["link", [["link", "링크"]]],
+  ["link", [["link", "링크", Link]]],
   [
     "blocks",
     [
-      ["bullet-list", "글머리 목록"],
-      ["ordered-list", "번호 목록"],
-      ["blockquote", "인용"],
+      ["bullet-list", "글머리 목록", List],
+      ["ordered-list", "번호 목록", ListOrdered],
+      ["blockquote", "인용", Quote],
     ],
   ],
-  ["insert", [["horizontal-rule", "구분선"]]],
+  ["insert", [["horizontal-rule", "구분선", Minus]]],
   [
     "history",
     [
-      ["undo", "실행 취소"],
-      ["redo", "다시 실행"],
+      ["undo", "실행 취소", Undo2],
+      ["redo", "다시 실행", Redo2],
     ],
   ],
 ] as const satisfies ReadonlyArray<
   readonly [
     string,
-    ReadonlyArray<readonly [MarkdownEditorCommand, string]>,
+    ReadonlyArray<readonly [MarkdownEditorCommand, string, LucideIcon]>,
   ]
 >;
 
@@ -285,21 +299,23 @@ export function MarkdownContentEditor({
           <div className="markdown-toolbar" aria-label="서식 도구">
             {toolbarGroups.map(([groupName, items]) => (
               <div className="markdown-toolbar-group" key={groupName}>
-                {items.map(([command, label]) => {
+                {items.map(([command, label, Icon]) => {
                   const state = toolbarState[command];
                   return (
                     <button
+                      aria-label={label}
                       aria-pressed={
                         selectionSensitiveToolbarCommands.has(command)
                           ? state.active
                           : undefined
                       }
+                      data-tooltip={label}
                       disabled={!state.enabled}
                       key={command}
                       onClick={() => runToolbarCommand(command)}
                       type="button"
                     >
-                      {label}
+                      <Icon aria-hidden="true" size={18} strokeWidth={2} />
                     </button>
                   );
                 })}

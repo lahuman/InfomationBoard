@@ -1,4 +1,11 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { MarkdownContentEditor } from "./markdown-content-editor";
 import type {
@@ -20,6 +27,20 @@ const defaultToolbarState: ToolbarState = {
   undo: { active: false, enabled: true },
   redo: { active: false, enabled: true },
 };
+
+const iconToolbarControls = [
+  ["제목 2", "heading-2"],
+  ["제목 3", "heading-3"],
+  ["굵게", "bold"],
+  ["기울임", "italic"],
+  ["링크", "link"],
+  ["글머리 목록", "bullet-list"],
+  ["번호 목록", "ordered-list"],
+  ["인용", "blockquote"],
+  ["구분선", "horizontal-rule"],
+  ["실행 취소", "undo"],
+  ["다시 실행", "redo"],
+] as const;
 
 function createFakeController(
   toolbarState: ToolbarState = defaultToolbarState,
@@ -106,6 +127,56 @@ it("exposes pressed state only for selection-sensitive toolbar commands", async 
   expect(screen.getByRole("button", { name: "다시 실행" })).not.toHaveAttribute(
     "aria-pressed",
   );
+});
+
+it("renders formatting controls as labelled Lucide icon buttons", async () => {
+  const editor = createFakeController();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="## 일정"
+    />,
+  );
+
+  const toolbar = screen.getByLabelText("서식 도구");
+  await screen.findByRole("button", { name: "굵게" });
+
+  for (const [label] of iconToolbarControls) {
+    const button = within(toolbar).getByRole("button", { name: label });
+    expect(button).toHaveAttribute("data-tooltip", label);
+    expect(button.textContent).toBe("");
+    expect(button.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+  }
+
+  expect(screen.getByRole("tab", { name: "리치 텍스트" })).toHaveTextContent(
+    "리치 텍스트",
+  );
+  expect(screen.getByRole("tab", { name: "Markdown 원문" })).toHaveTextContent(
+    "Markdown 원문",
+  );
+});
+
+it("dispatches the existing command for every non-link icon button", async () => {
+  const editor = createFakeController();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="본문"
+    />,
+  );
+
+  await screen.findByRole("button", { name: "굵게" });
+  for (const [label, command] of iconToolbarControls) {
+    if (command === "link") continue;
+    fireEvent.click(screen.getByRole("button", { name: label }));
+    expect(editor.run).toHaveBeenLastCalledWith(command);
+  }
 });
 
 it("falls back to source mode when Milkdown initialization fails", async () => {
