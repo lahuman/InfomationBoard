@@ -301,3 +301,48 @@ it("submits an internal relative link from the inline form", async () => {
 
   expect(editor.run).toHaveBeenCalledWith("link", { href: "/guide" });
 });
+
+it("removes an active link from the toolbar without opening the URL form", async () => {
+  const editor = createFakeController({
+    ...defaultToolbarState,
+    link: { active: true, enabled: true },
+  });
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="[안내](/guide)"
+    />,
+  );
+
+  const linkButton = await screen.findByRole("button", { name: "링크" });
+  await waitFor(() => expect(linkButton).toHaveAttribute("aria-pressed", "true"));
+  fireEvent.click(linkButton);
+
+  expect(editor.run).toHaveBeenCalledWith("link");
+  expect(screen.queryByLabelText("URL")).not.toBeInTheDocument();
+});
+
+it("groups formatting controls and renders help as a separate footer", async () => {
+  const editor = createFakeController();
+  const { container } = render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="본문"
+    />,
+  );
+
+  await screen.findByRole("button", { name: "굵게" });
+  expect(container.querySelectorAll(".markdown-toolbar-group")).toHaveLength(5);
+  const help = screen.getByText(
+    "서식 도구 또는 Markdown 원문으로 본문을 편집할 수 있습니다.",
+  );
+  expect(help).toHaveClass("markdown-editor-help");
+  expect(help.parentElement).toHaveClass("markdown-rich-surface");
+  expect(help.previousElementSibling).toHaveClass("markdown-editor-mount");
+});

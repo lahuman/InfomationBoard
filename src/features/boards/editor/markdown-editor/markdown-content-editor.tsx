@@ -19,19 +19,39 @@ type MarkdownContentEditorProps = {
 
 type EditorMode = "rich" | "source";
 
-const toolbarItems = [
-  ["heading-2", "제목 2"],
-  ["heading-3", "제목 3"],
-  ["bold", "굵게"],
-  ["italic", "기울임"],
-  ["link", "링크"],
-  ["bullet-list", "글머리 목록"],
-  ["ordered-list", "번호 목록"],
-  ["blockquote", "인용"],
-  ["horizontal-rule", "구분선"],
-  ["undo", "실행 취소"],
-  ["redo", "다시 실행"],
-] as const satisfies ReadonlyArray<readonly [MarkdownEditorCommand, string]>;
+const toolbarGroups = [
+  [
+    "text",
+    [
+      ["heading-2", "제목 2"],
+      ["heading-3", "제목 3"],
+      ["bold", "굵게"],
+      ["italic", "기울임"],
+    ],
+  ],
+  ["link", [["link", "링크"]]],
+  [
+    "blocks",
+    [
+      ["bullet-list", "글머리 목록"],
+      ["ordered-list", "번호 목록"],
+      ["blockquote", "인용"],
+    ],
+  ],
+  ["insert", [["horizontal-rule", "구분선"]]],
+  [
+    "history",
+    [
+      ["undo", "실행 취소"],
+      ["redo", "다시 실행"],
+    ],
+  ],
+] as const satisfies ReadonlyArray<
+  readonly [
+    string,
+    ReadonlyArray<readonly [MarkdownEditorCommand, string]>,
+  ]
+>;
 
 const selectionSensitiveToolbarCommands = new Set<MarkdownEditorCommand>([
   "heading-2",
@@ -192,13 +212,19 @@ export function MarkdownContentEditor({
   }
 
   function runToolbarCommand(command: MarkdownEditorCommand) {
+    const controller = controllerRef.current;
+    if (!controller) return;
+
     if (command === "link") {
-      setLinkFormVisible(true);
+      if (toolbarState.link.active) {
+        controller.run("link");
+        controller.focus();
+      } else {
+        setLinkFormVisible(true);
+      }
       return;
     }
 
-    const controller = controllerRef.current;
-    if (!controller) return;
     controller.run(command);
     controller.focus();
   }
@@ -257,24 +283,28 @@ export function MarkdownContentEditor({
 
         {mode === "rich" ? (
           <div className="markdown-toolbar" aria-label="서식 도구">
-            {toolbarItems.map(([command, label]) => {
-              const state = toolbarState[command];
-              return (
-                <button
-                  aria-pressed={
-                    selectionSensitiveToolbarCommands.has(command)
-                      ? state.active
-                      : undefined
-                  }
-                  disabled={!state.enabled}
-                  key={command}
-                  onClick={() => runToolbarCommand(command)}
-                  type="button"
-                >
-                  {label}
-                </button>
-              );
-            })}
+            {toolbarGroups.map(([groupName, items]) => (
+              <div className="markdown-toolbar-group" key={groupName}>
+                {items.map(([command, label]) => {
+                  const state = toolbarState[command];
+                  return (
+                    <button
+                      aria-pressed={
+                        selectionSensitiveToolbarCommands.has(command)
+                          ? state.active
+                          : undefined
+                      }
+                      disabled={!state.enabled}
+                      key={command}
+                      onClick={() => runToolbarCommand(command)}
+                      type="button"
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            ))}
           </div>
         ) : null}
       </div>
@@ -306,8 +336,8 @@ export function MarkdownContentEditor({
         id={richPanelId}
         role="tabpanel"
       >
-        <div ref={rootRef} />
-        <p id={richEditorHelpId}>
+        <div className="markdown-editor-mount" ref={rootRef} />
+        <p className="markdown-editor-help" id={richEditorHelpId}>
           서식 도구 또는 Markdown 원문으로 본문을 편집할 수 있습니다.
         </p>
       </div>

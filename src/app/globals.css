@@ -49,6 +49,23 @@ body {
   flex-wrap: wrap;
 }
 
+.markdown-toolbar {
+  gap: 0.65rem;
+}
+
+.markdown-toolbar-group {
+  display: flex;
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  padding-inline-end: 0.65rem;
+  border-inline-end: 1px solid var(--line);
+}
+
+.markdown-toolbar-group:last-child {
+  padding-inline-end: 0;
+  border-inline-end: 0;
+}
+
 .markdown-mode-tabs button,
 .markdown-toolbar button,
 .markdown-link-form button {
@@ -100,6 +117,10 @@ body {
 
 .markdown-rich-surface {
   min-height: 20rem;
+  padding: 0;
+}
+
+.markdown-editor-mount {
   padding: 0.9rem 1rem;
 }
 
@@ -124,10 +145,19 @@ body {
 }
 
 .markdown-content-editor [role="tabpanel"] > label,
-.markdown-content-editor [role="tabpanel"] > p {
+.markdown-content-editor [role="tabpanel"] > p:not(.markdown-editor-help) {
   display: block;
   margin: 0.75rem 0.9rem;
   font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.markdown-editor-help {
+  margin: 0;
+  padding: 0.55rem 1rem;
+  border-top: 1px solid var(--line);
+  color: color-mix(in srgb, var(--foreground) 68%, transparent);
+  font-size: 0.8rem;
   font-weight: 700;
 }
 
