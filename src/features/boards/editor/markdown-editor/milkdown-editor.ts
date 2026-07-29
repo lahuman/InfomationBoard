@@ -8,6 +8,7 @@ import {
   remarkStringifyOptionsCtx,
   rootCtx,
 } from "@milkdown/kit/core";
+import { lift } from "@milkdown/kit/prose/commands";
 import { TextSelection } from "@milkdown/kit/prose/state";
 import {
   blockquoteSchema,
@@ -16,12 +17,14 @@ import {
   emphasisSchema,
   headingSchema,
   insertHrCommand,
+  liftListItemCommand,
   linkSchema,
   orderedListSchema,
   strongSchema,
   toggleEmphasisCommand,
   toggleLinkCommand,
   toggleStrongCommand,
+  turnIntoTextCommand,
   wrapInBlockquoteCommand,
   wrapInBulletListCommand,
   wrapInHeadingCommand,
@@ -108,6 +111,13 @@ function toolbarStatesEqual(left: ToolbarState, right: ToolbarState): boolean {
       left[command].active === right[command].active &&
       left[command].enabled === right[command].enabled,
   );
+}
+
+function runProseCommand(editor: Editor, command: typeof lift): boolean {
+  return editor.action((ctx) => {
+    const view = ctx.get(editorViewCtx);
+    return command(view.state, view.dispatch, view);
+  });
 }
 
 export const createMilkdownEditorController: CreateMarkdownEditorController =
@@ -269,22 +279,33 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
         publishToolbarState();
       },
       run: (command, payload) => {
+        const activeState = getToolbarState();
         const commandActions: Record<
           Exclude<MarkdownEditorCommand, "link">,
           () => boolean
         > = {
           "heading-2": () =>
-            editor.action(callCommand(wrapInHeadingCommand.key, 2)),
+            activeState["heading-2"].active
+              ? editor.action(callCommand(turnIntoTextCommand.key))
+              : editor.action(callCommand(wrapInHeadingCommand.key, 2)),
           "heading-3": () =>
-            editor.action(callCommand(wrapInHeadingCommand.key, 3)),
+            activeState["heading-3"].active
+              ? editor.action(callCommand(turnIntoTextCommand.key))
+              : editor.action(callCommand(wrapInHeadingCommand.key, 3)),
           bold: () => editor.action(callCommand(toggleStrongCommand.key)),
           italic: () => editor.action(callCommand(toggleEmphasisCommand.key)),
           "bullet-list": () =>
-            editor.action(callCommand(wrapInBulletListCommand.key)),
+            activeState["bullet-list"].active
+              ? editor.action(callCommand(liftListItemCommand.key))
+              : editor.action(callCommand(wrapInBulletListCommand.key)),
           "ordered-list": () =>
-            editor.action(callCommand(wrapInOrderedListCommand.key)),
+            activeState["ordered-list"].active
+              ? editor.action(callCommand(liftListItemCommand.key))
+              : editor.action(callCommand(wrapInOrderedListCommand.key)),
           blockquote: () =>
-            editor.action(callCommand(wrapInBlockquoteCommand.key)),
+            activeState.blockquote.active
+              ? runProseCommand(editor, lift)
+              : editor.action(callCommand(wrapInBlockquoteCommand.key)),
           "horizontal-rule": () =>
             editor.action(callCommand(insertHrCommand.key)),
           undo: () => editor.action(callCommand(undoCommand.key)),

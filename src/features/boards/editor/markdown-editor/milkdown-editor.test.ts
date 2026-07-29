@@ -168,6 +168,57 @@ describe("createMilkdownEditorController", () => {
     expect(root.querySelector(selector)).toHaveTextContent("선택할 문장");
   });
 
+  it.each([
+    ["heading-2", "## 선택할 문장"],
+    ["heading-3", "### 선택할 문장"],
+  ] as const)("toggles %s back to a paragraph", async (command, formatted) => {
+    const { controller, root } = await setup("선택할 문장");
+    __testing.selectText(controller, 1, 7);
+
+    expect(controller.run(command)).toBe(true);
+    expect(controller.getMarkdown()).toBe(formatted);
+    expect(controller.getToolbarState()[command].active).toBe(true);
+
+    expect(controller.run(command)).toBe(true);
+    expect(controller.getMarkdown()).toBe("선택할 문장");
+    expect(root.querySelector("p")).toHaveTextContent("선택할 문장");
+    expect(controller.getToolbarState()[command].active).toBe(false);
+  });
+
+  it.each([
+    ["bold", "**선택할 문장**"],
+    ["italic", "*선택할 문장*"],
+  ] as const)("toggles %s off without deleting text", async (command, formatted) => {
+    const { controller } = await setup("선택할 문장");
+    __testing.selectText(controller, 1, 7);
+
+    expect(controller.run(command)).toBe(true);
+    expect(controller.getMarkdown()).toBe(formatted);
+    expect(controller.run(command)).toBe(true);
+    expect(controller.getMarkdown()).toBe("선택할 문장");
+  });
+
+  it.each([
+    ["bullet-list", "- 선택할 문장", "ul"],
+    ["ordered-list", "1. 선택할 문장", "ol"],
+    ["blockquote", "> 선택할 문장", "blockquote"],
+  ] as const)(
+    "toggles %s off without deleting text",
+    async (command, formatted, selector) => {
+      const { controller, root } = await setup("선택할 문장");
+      __testing.selectText(controller, 1, 7);
+
+      expect(controller.run(command)).toBe(true);
+      expect(controller.getMarkdown()).toBe(formatted);
+      expect(controller.getToolbarState()[command].active).toBe(true);
+
+      expect(controller.run(command)).toBe(true);
+      expect(controller.getMarkdown()).toBe("선택할 문장");
+      expect(root.querySelector(selector)).not.toBeInTheDocument();
+      expect(controller.getToolbarState()[command].active).toBe(false);
+    },
+  );
+
   it("rejects unsafe links and accepts safe links", async () => {
     const { controller } = await setup("원주 책방 틈");
     __testing.selectText(controller, 1, 8);
