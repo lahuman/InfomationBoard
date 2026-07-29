@@ -1,4 +1,6 @@
-export const ACCOUNT_STORAGE_LIMIT_BYTES = 100 * 1_048_576;
+import { ACCOUNT_STORAGE_LIMIT_BYTES } from "./images/model";
+
+export { ACCOUNT_STORAGE_LIMIT_BYTES } from "./images/model";
 
 const storageNumber = new Intl.NumberFormat("ko-KR", {
   maximumFractionDigits: 1,
@@ -47,9 +49,8 @@ export function StorageMeter({ storageBytes }: StorageMeterProps) {
         {Math.round((meterValue / ACCOUNT_STORAGE_LIMIT_BYTES) * 100)}%
       </meter>
       <p className="storage-note">
-        무료 베타 계정당 최대 100MB · 파일 업로드는 다음 단계에서 제공됩니다.
+        계정당 최대 50MB · 안내판 편집기에서 이미지를 관리할 수 있습니다.
       </p>
     </section>
   );
 }
-

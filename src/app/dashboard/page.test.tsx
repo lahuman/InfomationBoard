@@ -63,7 +63,7 @@ describe("DashboardPage", () => {
     render(await DashboardPage());
 
     expect(screen.getByText("여름 야시장")).toBeVisible();
-    expect(screen.getByText("1 MB / 100 MB")).toBeVisible();
+    expect(screen.getByText("1 MB / 50 MB")).toBeVisible();
   });
 
   it("shows a safe retry state when dashboard loading fails", async () => {
