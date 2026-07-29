@@ -2,6 +2,7 @@ import {
   defaultValueCtx,
   Editor,
   editorViewCtx,
+  remarkStringifyOptionsCtx,
   rootCtx,
 } from "@milkdown/kit/core";
 import { history } from "@milkdown/kit/plugin/history";
@@ -45,6 +46,10 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       .config((ctx) => {
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, markdown);
+        ctx.update(remarkStringifyOptionsCtx, (options) => ({
+          ...options,
+          bullet: "-" as const,
+        }));
         ctx.get(listenerCtx).markdownUpdated((_ctx, next, previous) => {
           if (applyingExternalValue || next === previous) return;
           lastExternalMarkdown = next;
@@ -58,8 +63,7 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       .create();
 
     const controller: MarkdownEditorController = {
-      getMarkdown: () =>
-        editor.action(getMarkdown()).replace(/^(\s*)\* /gm, "$1- "),
+      getMarkdown: () => editor.action(getMarkdown()),
       replaceMarkdown: (next) => {
         if (next === lastExternalMarkdown) return;
         applyingExternalValue = true;

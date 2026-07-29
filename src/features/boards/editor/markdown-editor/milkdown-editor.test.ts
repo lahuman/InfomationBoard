@@ -41,4 +41,54 @@ describe("createMilkdownEditorController", () => {
     expect(root.querySelector("ol")).toBeInTheDocument();
     expect(onMarkdownChange).not.toHaveBeenCalled();
   });
+
+  it("preserves fenced code that starts with a literal asterisk", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const controller = await createMilkdownEditorController({
+      root,
+      markdown: "```text\n* example\n```",
+      onMarkdownChange: vi.fn(),
+      onToolbarStateChange: vi.fn(),
+    });
+    controllers.push(controller);
+
+    expect(controller.getMarkdown()).toContain("```text\n* example\n```");
+  });
+
+  it("preserves GFM tables and strikethrough", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const controller = await createMilkdownEditorController({
+      root,
+      markdown: "| 상태 | 내용 |\n| --- | --- |\n| 완료 | ~~취소됨~~ |",
+      onMarkdownChange: vi.fn(),
+      onToolbarStateChange: vi.fn(),
+    });
+    controllers.push(controller);
+
+    expect(controller.getMarkdown()).toContain("~~취소됨~~");
+    expect(root.querySelector("table")).toBeInTheDocument();
+    expect(root.querySelector("del")).toHaveTextContent("취소됨");
+  });
+
+  it("preserves raw HTML source as inert editor text", async () => {
+    const root = document.createElement("div");
+    document.body.append(root);
+    const rawHtml =
+      '<script>globalThis.milkdownXss = true</script><img src=x onerror="globalThis.milkdownXss = true"><board-widget>안전</board-widget>';
+    const controller = await createMilkdownEditorController({
+      root,
+      markdown: rawHtml,
+      onMarkdownChange: vi.fn(),
+      onToolbarStateChange: vi.fn(),
+    });
+    controllers.push(controller);
+
+    expect(controller.getMarkdown()).toContain(rawHtml);
+    expect(root.querySelector("script")).not.toBeInTheDocument();
+    expect(root.querySelector('img[src="x"]')).not.toBeInTheDocument();
+    expect(root.querySelector("board-widget")).not.toBeInTheDocument();
+    expect(globalThis).not.toHaveProperty("milkdownXss");
+  });
 });
