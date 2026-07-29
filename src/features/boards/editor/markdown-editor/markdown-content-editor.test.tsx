@@ -1,8 +1,9 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { MarkdownContentEditor } from "./markdown-content-editor";
 import type {
   CreateMarkdownEditorController,
+  MarkdownEditorController,
   ToolbarState,
 } from "./types";
 
@@ -170,6 +171,77 @@ it("restores the last accepted value when rich text exceeds the character limit"
   expect(onChange).not.toHaveBeenCalled();
   expect(editor.replaceMarkdown).toHaveBeenCalledWith("허용된 내용");
   expect(await screen.findByRole("alert")).toHaveTextContent("200,000자까지");
+});
+
+it("does not send source Markdown beyond the supplied character limit", async () => {
+  const editor = createFakeController();
+  const onChange = vi.fn();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      maxLength={5}
+      onChange={onChange}
+      value="허용"
+    />,
+  );
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+  const source = screen.getByLabelText("본문 Markdown 원문");
+  fireEvent.change(source, { target: { value: "123456" } });
+
+  expect(source).toHaveAttribute("maxlength", "5");
+  expect(onChange).not.toHaveBeenCalled();
+  expect(source).toHaveValue("허용");
+});
+
+it("reconciles an external value received while the controller is initializing", async () => {
+  let resolveController: ((controller: MarkdownEditorController) => void) | undefined;
+  const controllerReady = new Promise<MarkdownEditorController>((resolve) => {
+    resolveController = resolve;
+  });
+  let markdown = "초기 내용";
+  const replaceMarkdown = vi.fn((next: string) => {
+    markdown = next;
+  });
+  const factory: CreateMarkdownEditorController = vi.fn(() => controllerReady);
+  const onChange = vi.fn();
+  const rendered = render(
+    <MarkdownContentEditor
+      createController={factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={onChange}
+      value="초기 내용"
+    />,
+  );
+
+  rendered.rerender(
+    <MarkdownContentEditor
+      createController={factory}
+      id="board-content"
+      maxLength={200_000}
+      onChange={onChange}
+      value="## 복구된 충돌 내용"
+    />,
+  );
+
+  await act(async () => {
+    resolveController?.({
+      getMarkdown: () => markdown,
+      replaceMarkdown,
+      run: vi.fn(() => true),
+      getToolbarState: () => defaultToolbarState,
+      focus: vi.fn(),
+      destroy: vi.fn(async () => undefined),
+    });
+  });
+
+  expect(replaceMarkdown).toHaveBeenCalledWith("## 복구된 충돌 내용");
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    "## 복구된 충돌 내용",
+  );
 });
 
 it("provides an inline link form and explains rejected URLs", async () => {

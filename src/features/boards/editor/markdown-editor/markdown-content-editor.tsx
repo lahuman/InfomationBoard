@@ -128,6 +128,17 @@ export function MarkdownContentEditor({
           void controller.destroy();
           return;
         }
+
+        try {
+          if (controller.getMarkdown() !== latestValueRef.current) {
+            controller.replaceMarkdown(latestValueRef.current);
+          }
+        } catch {
+          void controller.destroy();
+          setMode("source");
+          setError(conversionError);
+          return;
+        }
         controllerRef.current = controller;
         setToolbarState(controller.getToolbarState());
       })
@@ -291,10 +302,15 @@ export function MarkdownContentEditor({
           id={`${id}-source-input`}
           onChange={(event) => {
             const nextMarkdown = event.currentTarget.value;
+            if (nextMarkdown.length > maxLength) {
+              event.currentTarget.value = latestValueRef.current;
+              return;
+            }
             latestValueRef.current = nextMarkdown;
             setSourceValue(nextMarkdown);
             onChange(nextMarkdown);
           }}
+          maxLength={maxLength}
           value={sourceValue}
         />
         <p>{value.length.toLocaleString("ko-KR")} / {maxLength.toLocaleString("ko-KR")}자</p>
