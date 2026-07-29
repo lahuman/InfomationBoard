@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(51);
+select plan(61);
 
 select has_function(
   'public',
@@ -25,6 +25,16 @@ select has_function(
   'delete_board_image_record',
   array['uuid'],
   'ready image deletion uses an authenticated RPC boundary'
+);
+select ok(
+  position(
+    'FOR KEY SHARE' in upper(
+      pg_get_functiondef(
+        'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure
+      )
+    )
+  ) > 0,
+  'reservation locks the owned board before the profile row'
 );
 
 select results_eq(
@@ -157,24 +167,24 @@ select throws_ok(
        '30000000-0000-4000-8000-000000000003',
        'zero.png', 'image/png', 0
      ) $$,
-  '23514', null,
-  'zero-byte files are rejected'
+  'P0001', 'image_invalid_size',
+  'zero-byte files receive a stable application error'
 );
 select throws_ok(
   $$ select * from public.reserve_board_image(
        '30000000-0000-4000-8000-000000000003',
        'oversized.png', 'image/png', 10485761
      ) $$,
-  '23514', null,
-  'files larger than 10 MB are rejected'
+  'P0001', 'image_invalid_size',
+  'files larger than 10 MB receive a stable application error'
 );
 select throws_ok(
   $$ select * from public.reserve_board_image(
        '30000000-0000-4000-8000-000000000003',
        'document.pdf', 'application/pdf', 1024
      ) $$,
-  '23514', null,
-  'unsupported MIME types are rejected'
+  'P0001', 'image_invalid_mime_type',
+  'unsupported MIME types receive a stable application error'
 );
 select lives_ok(
   $$ select public.cancel_board_image(id)
@@ -349,6 +359,30 @@ select lives_ok(
      ) $$,
   'an owner creates a reservation for finalization'
 );
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       (select id from public.attachments
+        where original_filename = 'ready.webp'),
+       'image/webp', 0
+     ) $$,
+  'P0001', 'image_invalid_size',
+  'finalization rejects an invalid actual size with a stable error'
+);
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       (select id from public.attachments
+        where original_filename = 'ready.webp'),
+       'application/pdf', 2048
+     ) $$,
+  'P0001', 'image_invalid_mime_type',
+  'finalization rejects an invalid verified MIME with a stable error'
+);
+select results_eq(
+  $$ select storage_bytes from public.profiles
+     where id = '10000000-0000-4000-8000-000000000001' $$,
+  array[1024::bigint],
+  'invalid finalization leaves reserved storage accounting unchanged'
+);
 select results_eq(
   $$ select finalized.state || ':' ||
        finalized.mime_type || ':' || finalized.size_bytes::text
@@ -465,6 +499,104 @@ select results_eq(
      where owner_id = '20000000-0000-4000-8000-000000000002' $$,
   array[0::bigint],
   'account cleanup removes every owned image reservation'
+);
+
+alter table public.attachments
+drop constraint attachments_mime_type;
+alter table public.attachments
+disable trigger attachments_apply_storage_delta;
+insert into public.attachments (
+  id,
+  board_id,
+  owner_id,
+  storage_path,
+  original_filename,
+  mime_type,
+  size_bytes,
+  state,
+  reservation_expires_at
+) values
+(
+  '50000000-0000-4000-8000-000000000001',
+  '30000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000001',
+  'legacy/supported-image',
+  'legacy.png',
+  'image/png',
+  10485760,
+  'ready',
+  null
+),
+(
+  '50000000-0000-4000-8000-000000000002',
+  '30000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000001',
+  'legacy/document',
+  'legacy.pdf',
+  'application/pdf',
+  2048,
+  'ready',
+  null
+),
+(
+  '50000000-0000-4000-8000-000000000003',
+  '30000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000001',
+  'legacy/vector',
+  'legacy.svg',
+  'image/svg+xml',
+  4096,
+  'ready',
+  null
+);
+update public.profiles
+set storage_bytes = 0
+where id = '10000000-0000-4000-8000-000000000001';
+alter table public.attachments
+enable trigger attachments_apply_storage_delta;
+
+select lives_ok(
+  $$ select private.reconcile_board_image_attachments() $$,
+  'legacy attachment reconciliation completes before image constraints'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from public.attachments
+     where storage_path like 'legacy/%'
+       and mime_type not in (
+         'image/jpeg', 'image/png', 'image/webp', 'image/gif'
+       ) $$,
+  array[0::bigint],
+  'legacy non-image attachment metadata is removed explicitly'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from public.attachments
+     where id = '50000000-0000-4000-8000-000000000001' $$,
+  array[1::bigint],
+  'legacy supported image metadata is preserved'
+);
+select results_eq(
+  $$ select storage_bytes from public.profiles
+     where id = '10000000-0000-4000-8000-000000000001' $$,
+  array[10485760::bigint],
+  'legacy supported image bytes are authoritatively backfilled'
+);
+select lives_ok(
+  $$ alter table public.attachments
+     add constraint attachments_mime_type
+     check (
+       mime_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')
+     ) $$,
+  'the image-only MIME constraint validates after reconciliation'
+);
+delete from public.attachments
+where storage_path like 'legacy/%';
+select results_eq(
+  $$ select storage_bytes from public.profiles
+     where id = '10000000-0000-4000-8000-000000000001' $$,
+  array[0::bigint],
+  'legacy reconciliation fixture cleanup releases backfilled bytes'
 );
 
 reset role;

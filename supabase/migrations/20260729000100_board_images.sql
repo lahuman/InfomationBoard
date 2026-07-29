@@ -22,6 +22,39 @@ grant update (display_name) on public.profiles to authenticated;
 revoke insert, update, delete on public.attachments from authenticated;
 grant select on public.attachments to authenticated;
 
+create function private.reconcile_board_image_attachments()
+returns void
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  -- Incompatible legacy metadata cannot be truthfully reclassified as images.
+  delete from public.attachments
+  where attachments.mime_type not in (
+    'image/jpeg',
+    'image/png',
+    'image/webp',
+    'image/gif'
+  );
+
+  update public.profiles
+  set storage_bytes = coalesce(
+    (
+      select sum(attachments.size_bytes)
+      from public.attachments
+      where attachments.owner_id = profiles.id
+    ),
+    0
+  );
+end;
+$$;
+
+revoke all on function private.reconcile_board_image_attachments()
+from public, anon, authenticated;
+
+select private.reconcile_board_image_attachments();
+
 alter table public.attachments
 drop constraint if exists attachments_size_bytes_check,
 drop constraint if exists attachments_state,
@@ -127,6 +160,7 @@ declare
   account_id uuid := auth.uid();
   attachment_id uuid := gen_random_uuid();
   active_image_count bigint;
+  current_storage_bytes bigint;
   reserved_attachment public.attachments%rowtype;
 begin
   if account_id is null then
@@ -136,19 +170,45 @@ begin
   perform 1
   from public.boards
   where boards.id = p_board_id
-    and boards.owner_id = account_id;
+    and boards.owner_id = account_id
+  for key share;
 
   if not found then
     raise exception 'image_not_found';
   end if;
 
-  perform 1
+  select profiles.storage_bytes
+  into current_storage_bytes
   from public.profiles
   where profiles.id = account_id
   for update;
 
   if not found then
     raise exception 'image_not_found';
+  end if;
+
+  if p_size_bytes is not null
+    and p_size_bytes > 52428800 - current_storage_bytes
+  then
+    raise exception 'image_quota_exceeded';
+  end if;
+
+  if p_size_bytes is null
+    or p_size_bytes <= 0
+    or p_size_bytes > 10485760
+  then
+    raise exception 'image_invalid_size';
+  end if;
+
+  if p_mime_type is null
+    or p_mime_type not in (
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif'
+    )
+  then
+    raise exception 'image_invalid_mime_type';
   end if;
 
   select count(*)
@@ -248,6 +308,24 @@ begin
     end if;
 
     raise exception 'image_already_finalized';
+  end if;
+
+  if p_actual_size_bytes is null
+    or p_actual_size_bytes <= 0
+    or p_actual_size_bytes > 10485760
+  then
+    raise exception 'image_invalid_size';
+  end if;
+
+  if p_mime_type is null
+    or p_mime_type not in (
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif'
+    )
+  then
+    raise exception 'image_invalid_mime_type';
   end if;
 
   if owned_attachment.reservation_expires_at <= now() then
