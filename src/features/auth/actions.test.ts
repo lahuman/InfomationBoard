@@ -57,13 +57,31 @@ describe("requestMagicLink", () => {
       email: "owner@example.com",
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: "http://localhost:3000/dashboard",
+        emailRedirectTo:
+          "http://localhost:3000/auth/callback?next=%2Fdashboard",
       },
     });
     expect(result).toEqual({
       status: "success",
       message:
         "입력한 주소로 로그인 링크를 보냈습니다. 이메일을 확인해 주세요.",
+    });
+  });
+
+  it("replaces an external destination in the callback with the dashboard", async () => {
+    const formData = new FormData();
+    formData.set("email", "owner@example.com");
+    formData.set("next", "https://evil.test/steal");
+
+    await requestMagicLink(idle, formData);
+
+    expect(mocks.signInWithOtp).toHaveBeenCalledWith({
+      email: "owner@example.com",
+      options: {
+        shouldCreateUser: true,
+        emailRedirectTo:
+          "http://localhost:3000/auth/callback?next=%2Fdashboard",
+      },
     });
   });
 

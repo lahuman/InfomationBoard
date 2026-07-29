@@ -36,7 +36,7 @@
 - Consumes: `requestMagicLink(previousState: AuthActionState, formData: FormData): Promise<AuthActionState>`
 - Produces: regression expectations for `options.emailRedirectTo` and unsafe `next` handling.
 
-- [ ] **Step 1: Change the existing successful request expectation**
+- [x] **Step 1: Change the existing successful request expectation**
 
 Replace the expected direct dashboard URL with the callback URL:
 
@@ -45,7 +45,7 @@ emailRedirectTo:
   "http://localhost:3000/auth/callback?next=%2Fdashboard",
 ```
 
-- [ ] **Step 2: Add a failing unsafe-destination test**
+- [x] **Step 2: Add a failing unsafe-destination test**
 
 Add this case inside `describe("requestMagicLink")`:
 
@@ -68,7 +68,7 @@ it("replaces an external destination in the callback with the dashboard", async 
 });
 ```
 
-- [ ] **Step 3: Run the focused test and verify RED**
+- [x] **Step 3: Run the focused test and verify RED**
 
 Run:
 
@@ -89,7 +89,7 @@ Expected: both callback URL expectations fail because production still passes
 - Produces: `authCallbackUrl(appUrl: string, next: string): string` as a private module helper.
 - Consumes: normalized `next` values from `safeNextPath`.
 
-- [ ] **Step 1: Add a focused private callback builder**
+- [x] **Step 1: Add a focused private callback builder**
 
 Add below `emailSchema`:
 
@@ -101,7 +101,7 @@ function authCallbackUrl(appUrl: string, next: string) {
 }
 ```
 
-- [ ] **Step 2: Use the callback for email and Google authentication**
+- [x] **Step 2: Use the callback for email and Google authentication**
 
 In `requestMagicLink`, replace the direct destination with:
 
@@ -117,7 +117,7 @@ const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next);
 
 and pass `redirectTo: callbackUrl`.
 
-- [ ] **Step 3: Run the focused tests and verify GREEN**
+- [x] **Step 3: Run the focused tests and verify GREEN**
 
 Run:
 
@@ -127,7 +127,7 @@ npm run test:run -- src/features/auth/actions.test.ts src/app/auth/callback/rout
 
 Expected: all focused auth action and callback tests pass.
 
-- [ ] **Step 4: Run the mutation check**
+- [x] **Step 4: Run the mutation check**
 
 Temporarily reason through these mutations without changing the worktree:
 
@@ -146,7 +146,7 @@ Temporarily reason through these mutations without changing the worktree:
 - Consumes: the shared `/auth/callback` behavior implemented in Task 2.
 - Produces: accurate test naming and deployment instructions.
 
-- [ ] **Step 1: Generalize the callback test description**
+- [x] **Step 1: Generalize the callback test description**
 
 Change:
 
@@ -160,7 +160,7 @@ to:
 describe("PKCE auth callback", () => {
 ```
 
-- [ ] **Step 2: Document the default Magic Link flow**
+- [x] **Step 2: Document the default Magic Link flow**
 
 Replace the required custom template instruction with:
 
@@ -173,7 +173,7 @@ Replace the required custom template instruction with:
   is not required for the default signup and login flow.
 ```
 
-- [ ] **Step 3: Check the documentation and diff**
+- [x] **Step 3: Check the documentation and diff**
 
 Run:
 
@@ -194,7 +194,7 @@ test naming, and documentation changes.
 - Consumes: the completed magic-link PKCE callback implementation.
 - Produces: fresh evidence for correctness, compatibility, and build integrity.
 
-- [ ] **Step 1: Run focused auth tests**
+- [x] **Step 1: Run focused auth tests**
 
 ```bash
 npm run test:run -- src/features/auth/actions.test.ts src/app/auth/callback/route.test.ts src/app/auth/confirm/route.test.ts src/features/auth/login-form.test.tsx
@@ -202,7 +202,7 @@ npm run test:run -- src/features/auth/actions.test.ts src/app/auth/callback/rout
 
 Expected: every focused test passes.
 
-- [ ] **Step 2: Run the complete repository verifier**
+- [x] **Step 2: Run the complete repository verifier**
 
 ```bash
 npm run verify
@@ -211,7 +211,7 @@ npm run verify
 Expected: lint, type checking, all Vitest tests, production build, and the
 client-secret scanner exit successfully.
 
-- [ ] **Step 3: Run browser E2E tests**
+- [x] **Step 3: Run browser E2E tests**
 
 ```bash
 npm run test:e2e
@@ -220,7 +220,7 @@ npm run test:e2e
 Expected: login-page and anonymous-dashboard behavior pass, together with the
 rest of the browser suite.
 
-- [ ] **Step 4: Run dependency security verification**
+- [x] **Step 4: Run dependency security verification**
 
 ```bash
 npm audit --audit-level=high
@@ -228,7 +228,7 @@ npm audit --audit-level=high
 
 Expected: no high or critical vulnerabilities.
 
-- [ ] **Step 5: Review final scope and commit**
+- [x] **Step 5: Review final scope and commit**
 
 ```bash
 git status --short

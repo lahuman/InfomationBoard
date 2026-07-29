@@ -14,6 +14,12 @@ export type AuthActionState = {
 
 const emailSchema = z.email();
 
+function authCallbackUrl(appUrl: string, next: string) {
+  const callbackUrl = new URL("/auth/callback", appUrl);
+  callbackUrl.searchParams.set("next", next);
+  return callbackUrl.toString();
+}
+
 export async function requestMagicLink(
   _previous: AuthActionState,
   formData: FormData,
@@ -37,7 +43,7 @@ export async function requestMagicLink(
       email: parsedEmail.data,
       options: {
         shouldCreateUser: true,
-        emailRedirectTo: `${env.NEXT_PUBLIC_APP_URL}${next}`,
+        emailRedirectTo: authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next),
       },
     }));
   } catch {
@@ -64,8 +70,7 @@ export async function requestMagicLink(
 export async function signInWithGoogle(formData: FormData): Promise<void> {
   const next = safeNextPath(String(formData.get("next") ?? ""));
   const env = getServerEnv();
-  const callbackUrl = new URL("/auth/callback", env.NEXT_PUBLIC_APP_URL);
-  callbackUrl.searchParams.set("next", next);
+  const callbackUrl = authCallbackUrl(env.NEXT_PUBLIC_APP_URL, next);
 
   const supabase = await createServerSupabaseClient();
   let result: Awaited<ReturnType<typeof supabase.auth.signInWithOAuth>>;
@@ -73,7 +78,7 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
     result = await supabase.auth.signInWithOAuth({
       provider: "google",
       options: {
-        redirectTo: callbackUrl.toString(),
+        redirectTo: callbackUrl,
       },
     });
   } catch {

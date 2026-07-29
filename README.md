@@ -82,8 +82,12 @@ In Supabase Dashboard, configure:
   - `http://localhost:3000/auth/confirm`
   - `<production-origin>/auth/callback`
   - `<production-origin>/auth/confirm`
-- Magic Link email template target:
-  `{{ .SiteURL }}/auth/confirm?token_hash={{ .TokenHash }}&type=email`
+- Magic Link uses Supabase's default email template and redirects through
+  `<application-origin>/auth/callback`, where the PKCE authorization code is
+  exchanged for a server-side session.
+- `/auth/confirm` remains available for direct token-hash verification in live
+  tests or an optional custom email template. Custom SMTP/template configuration
+  is not required for the default signup and login flow.
 
 Enable the Google provider in Supabase Authentication, save its Google Client
 ID and Client Secret there, then register the hosted Supabase callback URL shown

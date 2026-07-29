@@ -19,7 +19,7 @@ beforeEach(() => {
   mocks.exchangeCodeForSession.mockResolvedValue({ error: null });
 });
 
-describe("Google auth callback", () => {
+describe("PKCE auth callback", () => {
   it("exchanges a valid code and redirects internally", async () => {
     const response = await GET(
       new NextRequest(
