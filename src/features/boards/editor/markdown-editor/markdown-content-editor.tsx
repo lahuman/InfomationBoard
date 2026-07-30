@@ -16,13 +16,21 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import type { BoardImage } from "../../images/model";
+import { serializeImageWidthTitle } from "../../images/presentation";
 import { sanitizeBoardImageUrl } from "../../markdown/url";
 import { createMilkdownEditorController } from "./milkdown-editor";
+import {
+  escapeMarkdownAlt,
+  findSourceImageAtSelection,
+  replaceSourceImage,
+  type SourceImageSelection,
+} from "./source-image";
 import type {
   CreateMarkdownEditorController,
+  ImageEditorBridge,
   MarkdownEditorCommand,
   MarkdownEditorController,
+  SelectedEditorImage,
   ToolbarState,
 } from "./types";
 
@@ -32,9 +40,7 @@ type MarkdownContentEditorProps = {
   value: string;
   onChange(markdown: string): void;
   createController?: CreateMarkdownEditorController;
-  imageLibrary?: (
-    insertImage: (image: BoardImage, alt: string) => boolean,
-  ) => ReactNode;
+  imageLibrary?: (bridge: ImageEditorBridge) => ReactNode;
 };
 
 type EditorMode = "rich" | "source";
@@ -105,14 +111,6 @@ const conversionError =
   "Markdown을 리치 텍스트로 변환하지 못했습니다. 원문은 그대로 보존했습니다.";
 const linkError = "안전한 http, https, mailto 또는 내부 링크를 입력해 주세요.";
 
-function escapeMarkdownAlt(alt: string): string {
-  return alt
-    .replaceAll("\\", "\\\\")
-    .replaceAll("]", "\\]")
-    .replaceAll("(", "\\(")
-    .replaceAll(")", "\\)");
-}
-
 function characterLimitError(maxLength: number) {
   return `본문은 ${maxLength.toLocaleString("ko-KR")}자까지 입력할 수 있습니다.`;
 }
@@ -138,7 +136,13 @@ export function MarkdownContentEditor({
   const [error, setError] = useState("");
   const [linkFormVisible, setLinkFormVisible] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
-  const [imagePanelVisible, setImagePanelVisible] = useState(false);
+  const [imageModalOpen, setImageModalOpen] = useState(false);
+  const [selectedImage, setSelectedImage] =
+    useState<SelectedEditorImage | null>(null);
+  const imageContextRef = useRef<{
+    mode: EditorMode;
+    sourceSelection: SourceImageSelection | null;
+  }>({ mode: "rich", sourceSelection: null });
 
   onChangeRef.current = onChange;
   maxLengthRef.current = maxLength;
@@ -285,15 +289,59 @@ export function MarkdownContentEditor({
     controller.focus();
   }
 
-  function insertImage(image: BoardImage, alt: string): boolean {
-    if (sanitizeBoardImageUrl(image.url) !== image.url) return false;
+  function openImageModal() {
+    let nextSelectedImage: SelectedEditorImage | null = null;
+    let sourceSelection: SourceImageSelection | null = null;
 
     if (mode === "rich") {
+      nextSelectedImage = controllerRef.current?.getSelectedImage() ?? null;
+    } else {
+      const source = sourceRef.current;
+      if (source) {
+        sourceSelection = findSourceImageAtSelection(
+          latestValueRef.current,
+          source.selectionStart,
+          source.selectionEnd,
+        );
+        if (sourceSelection) {
+          nextSelectedImage = {
+            src: sourceSelection.src,
+            alt: sourceSelection.alt,
+            width: sourceSelection.width,
+          };
+        }
+      }
+    }
+
+    imageContextRef.current = { mode, sourceSelection };
+    setSelectedImage(nextSelectedImage);
+    setImageModalOpen(true);
+  }
+
+  function closeImageModal() {
+    setImageModalOpen(false);
+    setSelectedImage(null);
+    imageToggleRef.current?.focus();
+  }
+
+  function applyImage({
+    image,
+    alt,
+    width,
+  }: Parameters<ImageEditorBridge["applyImage"]>[0]): boolean {
+    if (sanitizeBoardImageUrl(image.url) !== image.url) return false;
+
+    if (imageContextRef.current.mode === "rich") {
       const controller = controllerRef.current;
       if (!controller) return false;
 
       const previousMarkdown = latestValueRef.current;
-      const didInsert = controller.run("image", { src: image.url, alt });
+      const didInsert = controller.run("image", {
+        src: image.url,
+        alt,
+        width,
+        replaceSelectedImage: selectedImage?.src === image.url,
+      });
       if (!didInsert) return false;
 
       let nextMarkdown: string;
@@ -302,10 +350,9 @@ export function MarkdownContentEditor({
       } catch {
         return false;
       }
-      if (
-        nextMarkdown === previousMarkdown ||
-        nextMarkdown.length > maxLengthRef.current
-      ) {
+      if (nextMarkdown === previousMarkdown) return false;
+
+      if (nextMarkdown.length > maxLengthRef.current) {
         try {
           controller.replaceMarkdown(previousMarkdown);
         } catch {
@@ -325,6 +372,8 @@ export function MarkdownContentEditor({
         onChangeRef.current(nextMarkdown);
       }
       setError("");
+      setImageModalOpen(false);
+      setSelectedImage(null);
       controller.focus();
       return true;
     }
@@ -333,25 +382,43 @@ export function MarkdownContentEditor({
     if (!source) return false;
 
     const currentValue = latestValueRef.current;
-    const start = source.selectionStart;
-    const end = source.selectionEnd;
-    const before = currentValue.slice(0, start);
-    const after = currentValue.slice(end);
-    const markdown = `![${escapeMarkdownAlt(alt)}](${image.url})`;
-    const prefix = before && !before.endsWith("\n") ? "\n" : "";
-    const suffix = after && !after.startsWith("\n") ? "\n" : "";
-    const nextMarkdown = `${before}${prefix}${markdown}${suffix}${after}`;
+    const capturedSourceImage = imageContextRef.current.sourceSelection;
+    let nextMarkdown: string;
+    let nextSelection: number;
+
+    if (capturedSourceImage?.src === image.url) {
+      nextMarkdown = replaceSourceImage(currentValue, capturedSourceImage, {
+        src: image.url,
+        alt,
+        width,
+      });
+      nextSelection =
+        capturedSourceImage.to + (nextMarkdown.length - currentValue.length);
+    } else {
+      const start = source.selectionStart;
+      const end = source.selectionEnd;
+      const before = currentValue.slice(0, start);
+      const after = currentValue.slice(end);
+      const markdown = `![${escapeMarkdownAlt(alt)}](${image.url} "${serializeImageWidthTitle(width)}")`;
+      const prefix = before && !before.endsWith("\n") ? "\n" : "";
+      const suffix = after && !after.startsWith("\n") ? "\n" : "";
+      nextMarkdown = `${before}${prefix}${markdown}${suffix}${after}`;
+      nextSelection = before.length + prefix.length + markdown.length;
+    }
+
+    if (nextMarkdown === currentValue) return false;
 
     if (nextMarkdown.length > maxLengthRef.current) {
       setError(characterLimitError(maxLengthRef.current));
       return false;
     }
 
-    const nextSelection = before.length + prefix.length + markdown.length;
     latestValueRef.current = nextMarkdown;
     setSourceValue(nextMarkdown);
     onChangeRef.current(nextMarkdown);
     setError("");
+    setImageModalOpen(false);
+    setSelectedImage(null);
     requestAnimationFrame(() => {
       source.focus();
       source.setSelectionRange(nextSelection, nextSelection);
@@ -363,16 +430,20 @@ export function MarkdownContentEditor({
   const sourcePanelId = `${id}-source-panel`;
   const richEditorHelpId = `${id}-rich-help`;
   const imagePanelId = `${id}-image-library-panel`;
-  const imageLibraryPanel = imageLibrary?.(insertImage);
+  const imageLibraryPanel = imageLibrary?.({
+    open: imageModalOpen,
+    selectedImage,
+    applyImage,
+    close: closeImageModal,
+  });
 
   return (
     <section
       className="markdown-content-editor"
       aria-label="본문 편집기"
       onKeyDown={(event) => {
-        if (event.key === "Escape" && imagePanelVisible) {
-          setImagePanelVisible(false);
-          imageToggleRef.current?.focus();
+        if (event.key === "Escape" && imageModalOpen) {
+          closeImageModal();
         }
       }}
     >
@@ -432,13 +503,11 @@ export function MarkdownContentEditor({
               <div className="markdown-toolbar-group markdown-image-toolbar-group">
                 <button
                   aria-controls={imagePanelId}
-                  aria-expanded={imagePanelVisible}
+                  aria-expanded={imageModalOpen}
                   aria-label="이미지"
                   className="markdown-image-toggle"
                   data-tooltip="이미지"
-                  onClick={() =>
-                    setImagePanelVisible((visible) => !visible)
-                  }
+                  onClick={openImageModal}
                   ref={imageToggleRef}
                   type="button"
                 >
@@ -512,7 +581,7 @@ export function MarkdownContentEditor({
       {imageLibrary ? (
         <div
           className="markdown-image-panel"
-          hidden={!imagePanelVisible}
+          hidden={!imageModalOpen}
           id={imagePanelId}
         >
           {imageLibraryPanel}

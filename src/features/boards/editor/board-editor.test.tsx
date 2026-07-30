@@ -5,7 +5,7 @@ import type { DeleteBoardResult } from "../actions/delete-board";
 import type { PublishBoardResult } from "../actions/publish-board";
 import type { UpdateBoardResult } from "../actions/update-board";
 import type { UpdateBoardInput } from "../schema";
-import type { BoardImageLibrary } from "../images/model";
+import type { BoardImage, BoardImageLibrary } from "../images/model";
 
 const routerMocks = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -59,6 +59,14 @@ const publicationProps = {
 const initialImageLibrary: BoardImageLibrary = {
   images: [],
   storageBytes: 0,
+};
+
+const boardImage: BoardImage = {
+  id: "11111111-1111-4111-8111-111111111111",
+  originalFilename: "poster.png",
+  mimeType: "image/png",
+  sizeBytes: 1_024,
+  url: "/b/summer-night-market/images/11111111-1111-4111-8111-111111111111",
 };
 
 beforeEach(() => {
@@ -495,7 +503,16 @@ it("wires the current draft, image lifecycle actions, and deletion revision into
 
   const imageLibraryProps = imageLibraryMocks.component.mock.lastCall?.[0] as {
     onBoardRevision(revision: number): void;
+    onInsert(image: BoardImage, alt: string): boolean;
   };
+  let didInsert = false;
+  act(() => {
+    didInsert = imageLibraryProps.onInsert(boardImage, "포스터");
+  });
+  expect(didInsert).toBe(true);
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    '# 저장 전 이미지 초안\n![포스터](/b/summer-night-market/images/11111111-1111-4111-8111-111111111111 "width=100")',
+  );
   act(() => imageLibraryProps.onBoardRevision(8));
   fireEvent.change(screen.getByLabelText("제목"), {
     target: { value: "삭제 뒤 수정" },

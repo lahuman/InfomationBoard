@@ -404,7 +404,7 @@ export function BoardEditor({
             id="board-content"
             imageLibrary={
               initialImageLibrary
-                ? (insertImage) => (
+                ? (imageBridge) => (
                     <ImageLibrary
                       boardId={board.id}
                       boardSlug={board.slug}
@@ -414,7 +414,9 @@ export function BoardEditor({
                       finalizeImageAction={finalizeImageAction}
                       initialLibrary={initialImageLibrary}
                       onBoardRevision={applyRevisionFence}
-                      onInsert={insertImage}
+                      onInsert={(image, alt) =>
+                        imageBridge.applyImage({ image, alt, width: 100 })
+                      }
                       reserveImageAction={reserveImageAction}
                     />
                   )

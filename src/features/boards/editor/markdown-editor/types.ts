@@ -1,3 +1,4 @@
+import type { BoardImage } from "../../images/model";
 import type { ImageWidth } from "../../images/presentation";
 
 export type MarkdownEditorCommand =
@@ -33,6 +34,17 @@ export type SelectedEditorImage = {
   src: string;
   alt: string;
   width: ImageWidth;
+};
+
+export type ImageEditorBridge = {
+  open: boolean;
+  selectedImage: SelectedEditorImage | null;
+  applyImage(input: {
+    image: BoardImage;
+    alt: string;
+    width: ImageWidth;
+  }): boolean;
+  close(): void;
 };
 
 export type MarkdownEditorPayload = {
