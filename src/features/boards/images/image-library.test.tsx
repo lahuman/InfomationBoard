@@ -63,6 +63,7 @@ function renderLibrary(
     bridge?: ImageEditorBridge;
     contentMarkdown?: string;
     initialLibrary?: BoardImageLibrary;
+    onOuterEscape?: () => void;
     strict?: boolean;
     uploadImage?: ImageLibraryProps["uploadImage"];
   } = {},
@@ -94,7 +95,24 @@ function renderLibrary(
       uploadImage={options.uploadImage}
     />
   );
-  return render(options.strict ? <StrictMode>{library}</StrictMode> : library);
+  const maybeStrict = options.strict ? (
+    <StrictMode>{library}</StrictMode>
+  ) : (
+    library
+  );
+  return render(
+    options.onOuterEscape ? (
+      <div
+        onKeyDown={(event) => {
+          if (event.key === "Escape") options.onOuterEscape?.();
+        }}
+      >
+        {maybeStrict}
+      </div>
+    ) : (
+      maybeStrict
+    ),
+  );
 }
 
 beforeEach(() => {
@@ -448,6 +466,47 @@ describe("ImageLibrary", () => {
         screen.getByRole("group", { name: "poster.png 이미지 크기" }),
       ).getByRole("radio", { name: "본문 너비의 25%" }),
     ).toBeChecked();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "poster.png 삭제" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("treats delete-dialog Escape as cancel without bubbling a bridge close", async () => {
+    const user = userEvent.setup();
+    const outerEscape = vi.fn(closeImageLibrary);
+    renderLibrary({ onOuterEscape: outerEscape });
+    await user.click(
+      screen.getByRole("button", { name: "poster.png 삭제" }),
+    );
+
+    fireEvent.keyDown(
+      screen.getByRole("button", { name: "poster.png 삭제 확인" }),
+      { key: "Escape" },
+    );
+
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
+    expect(closeImageLibrary).not.toHaveBeenCalled();
+    expect(outerEscape).not.toHaveBeenCalled();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "poster.png 삭제" }),
+      ).toHaveFocus(),
+    );
+  });
+
+  it("treats delete-dialog backdrop dismissal as cancel", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    await user.click(
+      screen.getByRole("button", { name: "poster.png 삭제" }),
+    );
+
+    fireEvent.pointerDown(screen.getByRole("dialog").parentElement!);
+
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
+    expect(closeImageLibrary).not.toHaveBeenCalled();
     await waitFor(() =>
       expect(
         screen.getByRole("button", { name: "poster.png 삭제" }),

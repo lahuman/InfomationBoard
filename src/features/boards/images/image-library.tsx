@@ -265,6 +265,11 @@ export function ImageLibrary({
     setDialog("delete");
   }
 
+  function cancelDelete() {
+    setRestoreDeleteFocus(true);
+    setDialog("manage");
+  }
+
   async function confirmDelete(image: BoardImage) {
     if (hasBoardImageReference(contentMarkdown, image.url)) {
       setDialog("manage");
@@ -337,218 +342,221 @@ export function ImageLibrary({
   const showDeleteDialog = dialog === "delete" && deletionImage !== undefined;
 
   return (
-    <ModalDialog
-      initialFocusRef={
-        showDeleteDialog
-          ? confirmDeleteRef
-          : restoreDeleteFocus
-            ? deleteButtonRef
-            : undefined
-      }
-      onClose={bridge.close}
-      open={bridge.open}
-      title={showDeleteDialog ? "이미지 삭제" : "이미지 관리"}
-      titleId={`${boardSlug}-image-library-dialog-title`}
+    <div
+      onKeyDown={(event) => {
+        if (event.key === "Escape") event.stopPropagation();
+      }}
     >
-      {showDeleteDialog ? (
-        <div className="image-library image-library-delete">
-          <p>{deletionImage.originalFilename}을 삭제할까요?</p>
-          <p>삭제한 이미지는 복구할 수 없습니다.</p>
-          <div className="image-library-actions">
-            <button
-              onClick={() => {
-                setRestoreDeleteFocus(true);
-                setDialog("manage");
-              }}
-              type="button"
-            >
-              취소
-            </button>
-            <button
-              className="image-library-delete-confirm"
-              onClick={() => void confirmDelete(deletionImage)}
-              ref={confirmDeleteRef}
-              type="button"
-            >
-              {deletionImage.originalFilename} 삭제 확인
-            </button>
+      <ModalDialog
+        initialFocusRef={
+          showDeleteDialog
+            ? confirmDeleteRef
+            : restoreDeleteFocus
+              ? deleteButtonRef
+              : undefined
+        }
+        onClose={showDeleteDialog ? cancelDelete : bridge.close}
+        open={bridge.open}
+        title={showDeleteDialog ? "이미지 삭제" : "이미지 관리"}
+        titleId={`${boardSlug}-image-library-dialog-title`}
+      >
+        {showDeleteDialog ? (
+          <div className="image-library image-library-delete">
+            <p>{deletionImage.originalFilename}을 삭제할까요?</p>
+            <p>삭제한 이미지는 복구할 수 없습니다.</p>
+            <div className="image-library-actions">
+              <button onClick={cancelDelete} type="button">
+                취소
+              </button>
+              <button
+                className="image-library-delete-confirm"
+                onClick={() => void confirmDelete(deletionImage)}
+                ref={confirmDeleteRef}
+                type="button"
+              >
+                {deletionImage.originalFilename} 삭제 확인
+              </button>
+            </div>
           </div>
-        </div>
-      ) : (
-        <div className="image-library" data-board-slug={boardSlug}>
-          <div className="image-library-heading">
-            <p>이미지를 업로드하고 본문의 현재 선택 위치에 삽입할 수 있습니다.</p>
-            <p className="image-library-usage">
-              {formatStorageBytes(storageBytes)} /{" "}
-              {formatStorageBytes(ACCOUNT_STORAGE_LIMIT_BYTES)}
-            </p>
-          </div>
+        ) : (
+          <div className="image-library" data-board-slug={boardSlug}>
+            <div className="image-library-heading">
+              <p>
+                이미지를 업로드하고 본문의 현재 선택 위치에 삽입할 수
+                있습니다.
+              </p>
+              <p className="image-library-usage">
+                {formatStorageBytes(storageBytes)} /{" "}
+                {formatStorageBytes(ACCOUNT_STORAGE_LIMIT_BYTES)}
+              </p>
+            </div>
 
-          <meter
-            aria-label="이미지 저장공간 사용량"
-            max={ACCOUNT_STORAGE_LIMIT_BYTES}
-            min={0}
-            value={Math.min(storageBytes, ACCOUNT_STORAGE_LIMIT_BYTES)}
-          />
-          <div className="image-library-limits">
-            <span>남은 공간 {formatStorageBytes(remainingBytes)}</span>
-            <span>이미지당 최대 10 MB · 안내판당 최대 20개</span>
-          </div>
-
-          <div className="image-library-upload">
-            <label htmlFor={`${boardSlug}-image-upload`}>이미지 추가</label>
-            <input
-              accept="image/jpeg,image/png,image/webp,image/gif"
-              disabled={uploadDisabled}
-              id={`${boardSlug}-image-upload`}
-              key={inputKey}
-              onChange={(event) => {
-                const file = event.currentTarget.files?.[0];
-                if (file) void upload(file);
-              }}
-              type="file"
+            <meter
+              aria-label="이미지 저장공간 사용량"
+              max={ACCOUNT_STORAGE_LIMIT_BYTES}
+              min={0}
+              value={Math.min(storageBytes, ACCOUNT_STORAGE_LIMIT_BYTES)}
             />
-            {selectedFile && pendingOperation === "upload" ? (
-              <span>{selectedFile.name}</span>
+            <div className="image-library-limits">
+              <span>남은 공간 {formatStorageBytes(remainingBytes)}</span>
+              <span>이미지당 최대 10 MB · 안내판당 최대 20개</span>
+            </div>
+
+            <div className="image-library-upload">
+              <label htmlFor={`${boardSlug}-image-upload`}>이미지 추가</label>
+              <input
+                accept="image/jpeg,image/png,image/webp,image/gif"
+                disabled={uploadDisabled}
+                id={`${boardSlug}-image-upload`}
+                key={inputKey}
+                onChange={(event) => {
+                  const file = event.currentTarget.files?.[0];
+                  if (file) void upload(file);
+                }}
+                type="file"
+              />
+              {selectedFile && pendingOperation === "upload" ? (
+                <span>{selectedFile.name}</span>
+              ) : null}
+            </div>
+
+            {message ? (
+              <p
+                className={`image-library-message image-library-message-${message.kind}`}
+                role={message.kind}
+              >
+                {message.text}
+              </p>
             ) : null}
-          </div>
 
-          {message ? (
-            <p
-              className={`image-library-message image-library-message-${message.kind}`}
-              role={message.kind}
-            >
-              {message.text}
-            </p>
-          ) : null}
-
-          {images.length ? (
-            <ul className="image-library-grid">
-              {images.map((image) => {
-                const decorative = decorativeIds.has(image.id);
-                const isPending = pendingOperation === image.id;
-                const isSelected = selectedImageId === image.id;
-                return (
-                  <li
-                    className="image-library-card"
-                    data-selected={isSelected || undefined}
-                    key={image.id}
-                  >
-                    <img alt="" loading="lazy" src={image.url} />
-                    <div className="image-library-card-content">
-                      <div>
-                        <strong>{image.originalFilename}</strong>
-                        <span>{formatStorageBytes(image.sizeBytes)}</span>
-                      </div>
-                      <label>
-                        대체 텍스트
-                        <input
-                          aria-label={`${image.originalFilename} 대체 텍스트`}
-                          disabled={decorative || isPending}
-                          onChange={(event) => {
-                            const value = event.currentTarget.value;
-                            setAltText((current) => ({
-                              ...current,
-                              [image.id]: value,
-                            }));
-                          }}
-                          type="text"
-                          value={altText[image.id] ?? ""}
-                        />
-                      </label>
-                      <label className="image-library-decorative image-library-decorative-target">
-                        <input
-                          aria-label={`${image.originalFilename} 장식용 이미지`}
-                          checked={decorative}
-                          disabled={isPending}
-                          onChange={(event) => {
-                            const checked = event.currentTarget.checked;
-                            setDecorativeIds((current) => {
-                              const next = new Set(current);
-                              if (checked) next.add(image.id);
-                              else next.delete(image.id);
-                              return next;
-                            });
-                          }}
-                          type="checkbox"
-                        />
-                        장식용 이미지
-                      </label>
-                      <fieldset
-                        aria-label={`${image.originalFilename} 이미지 크기`}
-                        className="image-library-widths"
-                        disabled={isPending}
-                      >
-                        <legend>이미지 크기</legend>
+            {images.length ? (
+              <ul className="image-library-grid">
+                {images.map((image) => {
+                  const decorative = decorativeIds.has(image.id);
+                  const isPending = pendingOperation === image.id;
+                  const isSelected = selectedImageId === image.id;
+                  return (
+                    <li
+                      className="image-library-card"
+                      data-selected={isSelected || undefined}
+                      key={image.id}
+                    >
+                      <img alt="" loading="lazy" src={image.url} />
+                      <div className="image-library-card-content">
                         <div>
-                          {IMAGE_WIDTHS.map((width) => (
-                            <label
-                              className="image-library-width-option"
-                              data-selected={
-                                widths[image.id] === width || undefined
-                              }
-                              key={width}
-                            >
-                              <input
-                                checked={
-                                  (widths[image.id] ?? DEFAULT_IMAGE_WIDTH) ===
-                                  width
-                                }
-                                name={`${boardSlug}-${image.id}-width`}
-                                onChange={() =>
-                                  setWidths((current) => ({
-                                    ...current,
-                                    [image.id]: width,
-                                  }))
-                                }
-                                type="radio"
-                                value={width}
-                              />
-                              본문 너비의 {width}%
-                            </label>
-                          ))}
+                          <strong>{image.originalFilename}</strong>
+                          <span>{formatStorageBytes(image.sizeBytes)}</span>
                         </div>
-                      </fieldset>
-                      <div className="image-library-actions">
-                        <button
-                          disabled={pendingOperation !== null}
-                          onClick={() => apply(image)}
-                          type="button"
+                        <label>
+                          대체 텍스트
+                          <input
+                            aria-label={`${image.originalFilename} 대체 텍스트`}
+                            disabled={decorative || isPending}
+                            onChange={(event) => {
+                              const value = event.currentTarget.value;
+                              setAltText((current) => ({
+                                ...current,
+                                [image.id]: value,
+                              }));
+                            }}
+                            type="text"
+                            value={altText[image.id] ?? ""}
+                          />
+                        </label>
+                        <label className="image-library-decorative image-library-decorative-target">
+                          <input
+                            aria-label={`${image.originalFilename} 장식용 이미지`}
+                            checked={decorative}
+                            disabled={isPending}
+                            onChange={(event) => {
+                              const checked = event.currentTarget.checked;
+                              setDecorativeIds((current) => {
+                                const next = new Set(current);
+                                if (checked) next.add(image.id);
+                                else next.delete(image.id);
+                                return next;
+                              });
+                            }}
+                            type="checkbox"
+                          />
+                          장식용 이미지
+                        </label>
+                        <fieldset
+                          aria-label={`${image.originalFilename} 이미지 크기`}
+                          className="image-library-widths"
+                          disabled={isPending}
                         >
-                          {isSelected
-                            ? "이미지 수정"
-                            : `${image.originalFilename} 삽입`}
-                        </button>
-                        <button
-                          disabled={pendingOperation !== null}
-                          onClick={() => requestDelete(image)}
-                          ref={
-                            deleteConfirmationId === image.id
-                              ? deleteButtonRef
-                              : undefined
-                          }
-                          type="button"
-                        >
-                          {image.originalFilename} 삭제
-                        </button>
+                          <legend>이미지 크기</legend>
+                          <div>
+                            {IMAGE_WIDTHS.map((width) => (
+                              <label
+                                className="image-library-width-option"
+                                data-selected={
+                                  widths[image.id] === width || undefined
+                                }
+                                key={width}
+                              >
+                                <input
+                                  checked={
+                                    (widths[image.id] ??
+                                      DEFAULT_IMAGE_WIDTH) === width
+                                  }
+                                  name={`${boardSlug}-${image.id}-width`}
+                                  onChange={() =>
+                                    setWidths((current) => ({
+                                      ...current,
+                                      [image.id]: width,
+                                    }))
+                                  }
+                                  type="radio"
+                                  value={width}
+                                />
+                                본문 너비의 {width}%
+                              </label>
+                            ))}
+                          </div>
+                        </fieldset>
+                        <div className="image-library-actions">
+                          <button
+                            disabled={pendingOperation !== null}
+                            onClick={() => apply(image)}
+                            type="button"
+                          >
+                            {isSelected
+                              ? "이미지 수정"
+                              : `${image.originalFilename} 삽입`}
+                          </button>
+                          <button
+                            disabled={pendingOperation !== null}
+                            onClick={() => requestDelete(image)}
+                            ref={
+                              deleteConfirmationId === image.id
+                                ? deleteButtonRef
+                                : undefined
+                            }
+                            type="button"
+                          >
+                            {image.originalFilename} 삭제
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : (
-            <p className="image-library-empty">
-              아직 업로드한 이미지가 없습니다.
-            </p>
-          )}
-          <div className="image-library-dialog-actions">
-            <button onClick={bridge.close} type="button">
-              닫기
-            </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            ) : (
+              <p className="image-library-empty">
+                아직 업로드한 이미지가 없습니다.
+              </p>
+            )}
+            <div className="image-library-dialog-actions">
+              <button onClick={bridge.close} type="button">
+                닫기
+              </button>
+            </div>
           </div>
-        </div>
-      )}
-    </ModalDialog>
+        )}
+      </ModalDialog>
+    </div>
   );
 }
