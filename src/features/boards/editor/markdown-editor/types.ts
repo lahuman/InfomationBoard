@@ -1,3 +1,5 @@
+import type { ImageWidth } from "../../images/presentation";
+
 export type MarkdownEditorCommand =
   | "heading-2"
   | "heading-3"
@@ -19,6 +21,7 @@ export type ToolbarState = Record<
 
 export type MarkdownEditorController = {
   getMarkdown(): string;
+  getSelectedImage(): SelectedEditorImage | null;
   replaceMarkdown(markdown: string): void;
   run(command: MarkdownEditorCommand, payload?: MarkdownEditorPayload): boolean;
   getToolbarState(): ToolbarState;
@@ -26,10 +29,18 @@ export type MarkdownEditorController = {
   destroy(): Promise<void>;
 };
 
+export type SelectedEditorImage = {
+  src: string;
+  alt: string;
+  width: ImageWidth;
+};
+
 export type MarkdownEditorPayload = {
   href?: string;
   src?: string;
   alt?: string;
+  width?: ImageWidth;
+  replaceSelectedImage?: boolean;
 };
 
 export type CreateMarkdownEditorController = (options: {

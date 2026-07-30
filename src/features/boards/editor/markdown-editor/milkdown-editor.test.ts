@@ -242,22 +242,100 @@ describe("createMilkdownEditorController", () => {
       "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
     __testing.selectText(controller, 3, 3);
 
-    expect(controller.run("image", { src: imageUrl, alt: "행사 포스터" })).toBe(
-      true,
-    );
+    expect(
+      controller.run("image", {
+        src: imageUrl,
+        alt: "행사 포스터",
+        width: 100,
+      }),
+    ).toBe(true);
     expect(controller.getToolbarState().image).toEqual({
       active: false,
       enabled: true,
     });
-    expect(controller.getMarkdown()).toContain(`![행사 포스터](${imageUrl})`);
+    expect(controller.getMarkdown()).toContain(
+      `![행사 포스터](${imageUrl} "width=100")`,
+    );
     await waitFor(() =>
       expect(onMarkdownChange).toHaveBeenLastCalledWith(
-        expect.stringContaining(`![행사 포스터](${imageUrl})`),
+        expect.stringContaining(
+          `![행사 포스터](${imageUrl} "width=100")`,
+        ),
       ),
     );
 
     expect(controller.run("undo")).toBe(true);
     expect(controller.getMarkdown()).toBe("앞 내용\n\n뒤 내용");
+  });
+
+  it("inspects and replaces a selected image in one undoable change", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const { controller } = await setup(
+      `![원본](${imageUrl} "width=50")`,
+    );
+    __testing.selectNode(controller, 1);
+
+    expect(controller.getSelectedImage()).toEqual({
+      src: imageUrl,
+      alt: "원본",
+      width: 50,
+    });
+    expect(
+      controller.run("image", {
+        src: imageUrl,
+        alt: "수정",
+        width: 25,
+        replaceSelectedImage: true,
+      }),
+    ).toBe(true);
+    expect(controller.getMarkdown()).toContain(
+      `![수정](${imageUrl} "width=25")`,
+    );
+
+    expect(controller.run("undo")).toBe(true);
+    expect(controller.getMarkdown()).toContain(
+      `![원본](${imageUrl} "width=50")`,
+    );
+  });
+
+  it("returns null and refuses replacement when no image node is selected", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const { controller } = await setup("일반 문단");
+    __testing.selectNode(controller, 0);
+
+    expect(controller.getSelectedImage()).toBeNull();
+    expect(
+      controller.run("image", {
+        src: imageUrl,
+        alt: "수정",
+        width: 50,
+        replaceSelectedImage: true,
+      }),
+    ).toBe(false);
+    expect(controller.getMarkdown()).toBe("일반 문단");
+  });
+
+  it("rejects an unsupported runtime image width without changing Markdown", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const { controller } = await setup(
+      `![원본](${imageUrl} "width=50")`,
+    );
+    __testing.selectNode(controller, 1);
+
+    expect(
+      controller.run("image", {
+        src: imageUrl,
+        alt: "수정",
+        width: 80 as never,
+        replaceSelectedImage: true,
+      }),
+    ).toBe(false);
+    expect(controller.getMarkdown()).toContain(
+      `![원본](${imageUrl} "width=50")`,
+    );
   });
 
   it("rejects missing and unsafe image sources without changing Markdown", async () => {

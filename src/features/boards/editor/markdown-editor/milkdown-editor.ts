@@ -9,7 +9,7 @@ import {
   rootCtx,
 } from "@milkdown/kit/core";
 import { lift } from "@milkdown/kit/prose/commands";
-import { TextSelection } from "@milkdown/kit/prose/state";
+import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
 import {
   blockquoteSchema,
   bulletListSchema,
@@ -18,6 +18,7 @@ import {
   headingSchema,
   insertImageCommand,
   insertHrCommand,
+  imageSchema,
   liftListItemCommand,
   linkSchema,
   orderedListSchema,
@@ -35,6 +36,13 @@ import { gfm, remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
 import { callCommand, getMarkdown, replaceAll } from "@milkdown/kit/utils";
+import {
+  DEFAULT_IMAGE_WIDTH,
+  IMAGE_WIDTHS,
+  parseImageWidthTitle,
+  serializeImageWidthTitle,
+  type ImageWidth,
+} from "../../images/presentation";
 import { sanitizeBoardImageUrl, sanitizeBoardUrl } from "../../markdown/url";
 import type {
   CreateMarkdownEditorController,
@@ -113,6 +121,10 @@ function toolbarStatesEqual(left: ToolbarState, right: ToolbarState): boolean {
       left[command].active === right[command].active &&
       left[command].enabled === right[command].enabled,
   );
+}
+
+function isImageWidth(value: unknown): value is ImageWidth {
+  return IMAGE_WIDTHS.some((width) => width === value);
 }
 
 function runProseCommand(editor: Editor, command: typeof lift): boolean {
@@ -268,6 +280,26 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
 
     const controller: MarkdownEditorController = {
       getMarkdown: () => normalizeMarkdown(editor.action(getMarkdown())),
+      getSelectedImage: () =>
+        editor.action((ctx) => {
+          const view = ctx.get(editorViewCtx);
+          const { selection } = view.state;
+          if (
+            !(selection instanceof NodeSelection) ||
+            selection.node.type !== imageSchema.type(ctx)
+          ) {
+            return null;
+          }
+
+          const src = sanitizeBoardImageUrl(selection.node.attrs.src);
+          if (!src) return null;
+
+          return {
+            src,
+            alt: selection.node.attrs.alt ?? "",
+            width: parseImageWidthTitle(selection.node.attrs.title),
+          };
+        }),
       replaceMarkdown: (next) => {
         if (normalizeMarkdown(next) === lastExternalMarkdown) return;
 
@@ -336,13 +368,45 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
             : command === "image"
               ? (() => {
                   const src = payload?.src;
-                  if (!src || sanitizeBoardImageUrl(src) !== src) return false;
+                  const width = payload?.width ?? DEFAULT_IMAGE_WIDTH;
+                  if (
+                    !src ||
+                    sanitizeBoardImageUrl(src) !== src ||
+                    !isImageWidth(width)
+                  ) {
+                    return false;
+                  }
+
+                  if (payload?.replaceSelectedImage) {
+                    return editor.action((ctx) => {
+                      const view = ctx.get(editorViewCtx);
+                      const { selection } = view.state;
+                      if (
+                        !(selection instanceof NodeSelection) ||
+                        selection.node.type !== imageSchema.type(ctx)
+                      ) {
+                        return false;
+                      }
+
+                      const transaction = view.state.tr.setNodeMarkup(
+                        selection.from,
+                        undefined,
+                        {
+                          src,
+                          alt: payload.alt ?? "",
+                          title: serializeImageWidthTitle(width),
+                        },
+                      );
+                      view.dispatch(transaction.scrollIntoView());
+                      return true;
+                    });
+                  }
 
                   return editor.action(
                     callCommand(insertImageCommand.key, {
                       src,
                       alt: payload?.alt ?? "",
-                      title: "",
+                      title: serializeImageWidthTitle(width),
                     }),
                   );
                 })()
@@ -366,6 +430,19 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
   };
 
 export const __testing = {
+  selectNode(controller: MarkdownEditorController, position: number) {
+    const editor = editors.get(controller);
+    if (!editor) throw new Error("Markdown editor controller is unavailable.");
+
+    editor.action((ctx) => {
+      const view = ctx.get(editorViewCtx);
+      view.dispatch(
+        view.state.tr.setSelection(
+          NodeSelection.create(view.state.doc, position),
+        ),
+      );
+    });
+  },
   selectText(controller: MarkdownEditorController, from: number, to: number) {
     const editor = editors.get(controller);
     if (!editor) throw new Error("Markdown editor controller is unavailable.");

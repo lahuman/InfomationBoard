@@ -73,6 +73,7 @@ function createFakeController(
     onMarkdownChange = options.onMarkdownChange;
     return {
       getMarkdown: () => markdown,
+      getSelectedImage: () => null,
       replaceMarkdown,
       run,
       getToolbarState: () => toolbarState,
@@ -474,6 +475,7 @@ it("reconciles an external value received while the controller is initializing",
   await act(async () => {
     resolveController?.({
       getMarkdown: () => markdown,
+      getSelectedImage: () => null,
       replaceMarkdown,
       run: vi.fn(() => true),
       getToolbarState: () => defaultToolbarState,
