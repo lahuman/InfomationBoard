@@ -7,9 +7,15 @@ import {
   parserCtx,
   remarkStringifyOptionsCtx,
   rootCtx,
+  serializerCtx,
 } from "@milkdown/kit/core";
 import { lift } from "@milkdown/kit/prose/commands";
-import { NodeSelection, TextSelection } from "@milkdown/kit/prose/state";
+import {
+  NodeSelection,
+  TextSelection,
+  type Transaction,
+} from "@milkdown/kit/prose/state";
+import type { EditorView } from "@milkdown/kit/prose/view";
 import {
   blockquoteSchema,
   bulletListSchema,
@@ -34,7 +40,6 @@ import {
 } from "@milkdown/kit/preset/commonmark";
 import { gfm, remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
-import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
 import { callCommand, getMarkdown, replaceAll } from "@milkdown/kit/utils";
 import {
   DEFAULT_IMAGE_WIDTH,
@@ -67,6 +72,7 @@ const commands: MarkdownEditorCommand[] = [
 ];
 
 const editors = new WeakMap<MarkdownEditorController, Editor>();
+const failNextImageSerialization = new WeakSet<MarkdownEditorController>();
 
 export class MarkdownParseError extends Error {
   constructor() {
@@ -143,30 +149,96 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
     onMarkdownChange,
     onToolbarStateChange,
   }) => {
-    let lastExternalMarkdown = normalizeMarkdown(markdown);
-    let applyingExternalValue = false;
+    let lastPublishedMarkdown = normalizeMarkdown(markdown);
+    let markdownPublicationTimer: ReturnType<typeof setTimeout> | null = null;
     let currentToolbarState = createDefaultToolbarState();
     let getToolbarState = () => currentToolbarState;
     let publishToolbarState = () => {};
+
+    const cancelPendingMarkdownPublication = () => {
+      if (markdownPublicationTimer === null) return;
+      clearTimeout(markdownPublicationTimer);
+      markdownPublicationTimer = null;
+    };
+
+    const synchronizeMarkdownPublication = (nextMarkdown: string) => {
+      cancelPendingMarkdownPublication();
+      lastPublishedMarkdown = normalizeMarkdown(nextMarkdown);
+    };
+
+    const publishMarkdown = (nextMarkdown: string) => {
+      const normalizedNext = normalizeMarkdown(nextMarkdown);
+      if (normalizedNext === lastPublishedMarkdown) return;
+
+      lastPublishedMarkdown = normalizedNext;
+      onMarkdownChange(normalizedNext);
+    };
+
+    const scheduleMarkdownPublication = () => {
+      cancelPendingMarkdownPublication();
+      markdownPublicationTimer = setTimeout(() => {
+        markdownPublicationTimer = null;
+        try {
+          publishMarkdown(controller.getMarkdown());
+        } catch {
+          // Preserve the last accepted Markdown when serialization fails.
+        }
+      }, 200);
+    };
+
+    const observeTransaction = (
+      transaction: Transaction,
+      previousSelection: typeof transaction.selection,
+    ) => {
+      if (
+        (transaction.docChanged || transaction.storedMarksSet) &&
+        transaction.getMeta("addToHistory") !== false
+      ) {
+        scheduleMarkdownPublication();
+      }
+
+      if (
+        transaction.docChanged ||
+        transaction.storedMarksSet ||
+        !transaction.selection.eq(previousSelection)
+      ) {
+        publishToolbarState();
+      }
+    };
 
     const editor = await Editor.make()
       .config((ctx) => {
         ctx.set(rootCtx, root);
         ctx.set(defaultValueCtx, markdown);
-        ctx.update(editorViewOptionsCtx, (options) => ({
-          ...options,
-          attributes: {
-            ...options.attributes,
-            role: "textbox",
-            "aria-multiline": "true",
-            ...(ariaLabelledBy
-              ? { "aria-labelledby": ariaLabelledBy }
-              : {}),
-            ...(ariaDescribedBy
-              ? { "aria-describedby": ariaDescribedBy }
-              : {}),
-          },
-        }));
+        ctx.update(editorViewOptionsCtx, (options) => {
+          const dispatchTransaction = options.dispatchTransaction;
+          return {
+            ...options,
+            attributes: {
+              ...options.attributes,
+              role: "textbox",
+              "aria-multiline": "true",
+              ...(ariaLabelledBy
+                ? { "aria-labelledby": ariaLabelledBy }
+                : {}),
+              ...(ariaDescribedBy
+                ? { "aria-describedby": ariaDescribedBy }
+                : {}),
+            },
+            dispatchTransaction: function (
+              this: EditorView,
+              transaction: Transaction,
+            ) {
+              const previousSelection = this.state.selection;
+              if (dispatchTransaction) {
+                dispatchTransaction.call(this, transaction);
+              } else {
+                this.updateState(this.state.apply(transaction));
+              }
+              observeTransaction(transaction, previousSelection);
+            },
+          };
+        });
         ctx.update(remarkStringifyOptionsCtx, (options) => ({
           ...options,
           bullet: "-" as const,
@@ -176,29 +248,10 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
           ...options,
           tablePipeAlign: false,
         }));
-        ctx.get(listenerCtx).markdownUpdated((_ctx, next, previous) => {
-          const normalizedNext = normalizeMarkdown(next);
-          if (
-            applyingExternalValue ||
-            normalizedNext === normalizeMarkdown(previous) ||
-            normalizedNext === lastExternalMarkdown
-          ) {
-            publishToolbarState();
-            return;
-          }
-
-          lastExternalMarkdown = normalizedNext;
-          onMarkdownChange(normalizedNext);
-          publishToolbarState();
-        });
-        ctx.get(listenerCtx).selectionUpdated(() => {
-          publishToolbarState();
-        });
       })
       .use(commonmark)
       .use(gfm)
       .use(history)
-      .use(listener)
       .create();
 
     getToolbarState = () =>
@@ -278,6 +331,68 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       onToolbarStateChange(nextToolbarState);
     };
 
+    const createImageTransaction = (
+      payload: Parameters<MarkdownEditorController["applyImage"]>[0],
+    ): Transaction | null => {
+      const src = payload.src;
+      const width = payload.width ?? DEFAULT_IMAGE_WIDTH;
+      if (
+        typeof src !== "string" ||
+        sanitizeBoardImageUrl(src) !== src ||
+        !isImageWidth(width) ||
+        (payload.alt !== undefined && typeof payload.alt !== "string")
+      ) {
+        return null;
+      }
+
+      return editor.action((ctx) => {
+        const view = ctx.get(editorViewCtx);
+        const { selection } = view.state;
+        const imageType = imageSchema.type(ctx);
+        const attributes = {
+          src,
+          alt: payload.alt ?? "",
+          title: serializeImageWidthTitle(width),
+        };
+
+        if (payload.replaceSelectedImage) {
+          if (
+            !(selection instanceof NodeSelection) ||
+            selection.node.type !== imageType
+          ) {
+            return null;
+          }
+
+          return view.state.tr
+            .setNodeMarkup(selection.from, undefined, attributes)
+            .scrollIntoView();
+        }
+
+        if (
+          selection instanceof NodeSelection &&
+          selection.node.type === imageType
+        ) {
+          const imageNode = imageType.create(attributes);
+          const transaction = view.state.tr.insert(selection.to, imageNode);
+          return transaction
+            .setSelection(NodeSelection.create(transaction.doc, selection.to))
+            .scrollIntoView();
+        }
+
+        let candidate: Transaction | null = null;
+        const didRun = ctx
+          .get(commandsCtx)
+          .get(insertImageCommand.key)(attributes)(
+            view.state,
+            (transaction) => {
+              candidate = transaction;
+            },
+            view,
+          );
+        return didRun ? candidate : null;
+      });
+    };
+
     const controller: MarkdownEditorController = {
       getMarkdown: () => normalizeMarkdown(editor.action(getMarkdown())),
       getSelectedImage: () =>
@@ -301,20 +416,74 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
           };
         }),
       replaceMarkdown: (next) => {
-        if (normalizeMarkdown(next) === lastExternalMarkdown) return;
+        const normalizedNext = normalizeMarkdown(next);
+        try {
+          if (controller.getMarkdown() === normalizedNext) {
+            synchronizeMarkdownPublication(normalizedNext);
+            return;
+          }
+        } catch {
+          // Replacing the document is also the recovery path for serialization.
+        }
 
         editor.action((ctx) => {
           if (!ctx.get(parserCtx)(next)) throw new MarkdownParseError();
         });
 
-        applyingExternalValue = true;
-        try {
-          editor.action(replaceAll(next, true));
-          lastExternalMarkdown = normalizeMarkdown(editor.action(getMarkdown()));
-        } finally {
-          applyingExternalValue = false;
-        }
+        cancelPendingMarkdownPublication();
+        editor.action(replaceAll(next, true));
+        synchronizeMarkdownPublication(
+          normalizeMarkdown(editor.action(getMarkdown())),
+        );
         publishToolbarState();
+      },
+      applyImage: (payload, maxLength) => {
+        const previousMarkdown = normalizeMarkdown(editor.action(getMarkdown()));
+        let candidate: Transaction | null;
+        try {
+          candidate = createImageTransaction(payload);
+        } catch {
+          return { status: "rejected" };
+        }
+        if (!candidate) return { status: "rejected" };
+
+        let nextMarkdown: string;
+        try {
+          if (failNextImageSerialization.delete(controller)) {
+            throw new Error("Forced image serialization failure.");
+          }
+          nextMarkdown = editor.action((ctx) =>
+            normalizeMarkdown(ctx.get(serializerCtx)(candidate.doc)),
+          );
+        } catch {
+          return { status: "serialization_error" };
+        }
+
+        if (nextMarkdown === previousMarkdown) {
+          return { status: "unchanged" };
+        }
+
+        if (nextMarkdown.length > maxLength) {
+          return { status: "too_long" };
+        }
+
+        try {
+          editor.action((ctx) =>
+            ctx.get(editorViewCtx).dispatch(candidate),
+          );
+        } catch {
+          try {
+            controller.replaceMarkdown(previousMarkdown);
+          } catch {
+            // The caller must leave rich mode if an applied transaction cannot
+            // be restored after an editor-view failure.
+          }
+          return { status: "restore_failed" };
+        }
+
+        synchronizeMarkdownPublication(nextMarkdown);
+        onMarkdownChange(nextMarkdown);
+        return { status: "applied", markdown: nextMarkdown };
       },
       run: (command, payload) => {
         const activeState = getToolbarState();
@@ -366,50 +535,10 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
                   : false;
               })()
             : command === "image"
-              ? (() => {
-                  const src = payload?.src;
-                  const width = payload?.width ?? DEFAULT_IMAGE_WIDTH;
-                  if (
-                    !src ||
-                    sanitizeBoardImageUrl(src) !== src ||
-                    !isImageWidth(width)
-                  ) {
-                    return false;
-                  }
-
-                  if (payload?.replaceSelectedImage) {
-                    return editor.action((ctx) => {
-                      const view = ctx.get(editorViewCtx);
-                      const { selection } = view.state;
-                      if (
-                        !(selection instanceof NodeSelection) ||
-                        selection.node.type !== imageSchema.type(ctx)
-                      ) {
-                        return false;
-                      }
-
-                      const transaction = view.state.tr.setNodeMarkup(
-                        selection.from,
-                        undefined,
-                        {
-                          src,
-                          alt: payload.alt ?? "",
-                          title: serializeImageWidthTitle(width),
-                        },
-                      );
-                      view.dispatch(transaction.scrollIntoView());
-                      return true;
-                    });
-                  }
-
-                  return editor.action(
-                    callCommand(insertImageCommand.key, {
-                      src,
-                      alt: payload?.alt ?? "",
-                      title: serializeImageWidthTitle(width),
-                    }),
-                  );
-                })()
+              ? controller.applyImage(
+                  payload ?? {},
+                  Number.POSITIVE_INFINITY,
+                ).status === "applied"
             : commandActions[command]();
 
         if (didRun) publishToolbarState();
@@ -418,6 +547,7 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       getToolbarState: () => getToolbarState(),
       focus: () => editor.action((ctx) => ctx.get(editorViewCtx).focus()),
       destroy: async () => {
+        cancelPendingMarkdownPublication();
         editors.delete(controller);
         await editor.destroy();
       },
@@ -430,6 +560,12 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
   };
 
 export const __testing = {
+  failNextImageSerialization(controller: MarkdownEditorController) {
+    if (!editors.has(controller)) {
+      throw new Error("Markdown editor controller is unavailable.");
+    }
+    failNextImageSerialization.add(controller);
+  },
   selectNode(controller: MarkdownEditorController, position: number) {
     const editor = editors.get(controller);
     if (!editor) throw new Error("Markdown editor controller is unavailable.");

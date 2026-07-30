@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  escapeMarkdownAlt,
   findSourceImageAtSelection,
   replaceSourceImage,
 } from "./source-image";
@@ -87,6 +88,27 @@ describe("findSourceImageAtSelection", () => {
 
     expect(findSourceImageAtSelection(reference, 4, 4)).toBeNull();
   });
+
+  it.each([
+    ["an absent title", `![원본](${imageUrl})`],
+    ["a malformed title", `![원본](${imageUrl} "width=large")`],
+    ["an unsupported width", `![원본](${imageUrl} "width=80")`],
+  ])("normalizes %s to width 100 when selected and edited", (_name, source) => {
+    const caret = source.indexOf("원본") + 1;
+    const selection = findSourceImageAtSelection(source, caret, caret);
+
+    expect(selection).toMatchObject({
+      src: imageUrl,
+      alt: "원본",
+      width: 100,
+    });
+    const normalized = replaceSourceImage(source, selection!, {
+      src: imageUrl,
+      alt: "원본",
+      width: selection!.width,
+    });
+    expect(normalized).toBe(`![원본](${imageUrl} "width=100")`);
+  });
 });
 
 describe("replaceSourceImage", () => {
@@ -98,15 +120,19 @@ describe("replaceSourceImage", () => {
     const selection = findSourceImageAtSelection(markdown, caret, caret);
 
     expect(selection).toMatchObject({ src: imageUrl, alt: "원본", width: 50 });
+    const replaced = replaceSourceImage(markdown, selection!, {
+      src: imageUrl,
+      alt: "대괄호 ]와 역슬래시 \\",
+      width: 25,
+    });
+    const replacedCaret = replaced.indexOf(imageUrl) + 5;
     expect(
-      replaceSourceImage(markdown, selection!, {
-        src: imageUrl,
-        alt: "대괄호 ]와 역슬래시 \\",
-        width: 25,
-      }),
-    ).toContain(
-      `![대괄호 \\]와 역슬래시 \\\\](${imageUrl} "width=25")`,
-    );
+      findSourceImageAtSelection(replaced, replacedCaret, replacedCaret),
+    ).toMatchObject({
+      src: imageUrl,
+      alt: "대괄호 ]와 역슬래시 \\",
+      width: 25,
+    });
   });
 
   it("leaves Markdown unchanged when the captured source image is stale", () => {
@@ -121,5 +147,33 @@ describe("replaceSourceImage", () => {
         width: 100,
       }),
     ).toBe(changed);
+  });
+
+  it.each([
+    ["brackets", "대괄호 [열기]와 닫기 ]"],
+    ["emphasis", "*강조*와 _기울임_"],
+    ["code", "`코드` 표시"],
+    ["entities", "엔터티 &amp;와 &copy;"],
+    ["parentheses", "괄호 (안)과 (밖)"],
+    ["backslashes", "역슬래시 \\ 경로"],
+  ])("round-trips %s in alt text for source insertion and update", (_name, alt) => {
+    const inserted = `![${escapeMarkdownAlt(alt)}](${imageUrl} "width=50")`;
+    const insertedCaret = inserted.indexOf(imageUrl) + 5;
+
+    expect(
+      findSourceImageAtSelection(inserted, insertedCaret, insertedCaret),
+    ).toMatchObject({ src: imageUrl, alt, width: 50 });
+
+    const original = `![원본](${imageUrl} "width=25")`;
+    const originalSelection = findSourceImageAtSelection(original, 4, 4);
+    const updated = replaceSourceImage(original, originalSelection!, {
+      src: imageUrl,
+      alt,
+      width: 75,
+    });
+    const updatedCaret = updated.indexOf(imageUrl) + 5;
+    expect(
+      findSourceImageAtSelection(updated, updatedCaret, updatedCaret),
+    ).toMatchObject({ src: imageUrl, alt, width: 75 });
   });
 });

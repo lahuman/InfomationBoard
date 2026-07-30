@@ -4,6 +4,10 @@ import {
   __testing,
   createMilkdownEditorController,
 } from "./milkdown-editor";
+import {
+  escapeMarkdownAlt,
+  findSourceImageAtSelection,
+} from "./source-image";
 
 const sample = `## 일정
 
@@ -268,6 +272,106 @@ describe("createMilkdownEditorController", () => {
     expect(controller.getMarkdown()).toBe("앞 내용\n\n뒤 내용");
   });
 
+  it("inserts a different image beside a selected image without replacing it", async () => {
+    const firstImageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const secondImageUrl =
+      "/b/summer-market/images/22222222-2222-4222-8222-222222222222";
+    const onMarkdownChange = vi.fn();
+    const { controller } = await setup(
+      `![첫 이미지](${firstImageUrl} "width=25")`,
+      { onMarkdownChange },
+    );
+    __testing.selectNode(controller, 1);
+
+    vi.useFakeTimers();
+    try {
+      expect(
+        controller.run("image", {
+          src: secondImageUrl,
+          alt: "둘째 이미지",
+          width: 50,
+          replaceSelectedImage: false,
+        }),
+      ).toBe(true);
+      expect(controller.getMarkdown()).toContain(
+        `![첫 이미지](${firstImageUrl} "width=25")`,
+      );
+      expect(controller.getMarkdown()).toContain(
+        `![둘째 이미지](${secondImageUrl} "width=50")`,
+      );
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(onMarkdownChange).toHaveBeenCalledOnce();
+      expect(controller.run("undo")).toBe(true);
+      expect(controller.getMarkdown()).toBe(
+        `![첫 이미지](${firstImageUrl} "width=25")`,
+      );
+      await vi.advanceTimersByTimeAsync(250);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("keeps a pending ordinary edit publishable after image rollback", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const onMarkdownChange = vi.fn();
+    const { controller } = await setup("본문", { onMarkdownChange });
+    __testing.selectText(controller, 1, 3);
+
+    vi.useFakeTimers();
+    try {
+      expect(controller.run("bold")).toBe(true);
+      const pendingMarkdown = controller.getMarkdown();
+      expect(pendingMarkdown).toBe("**본문**");
+      expect(onMarkdownChange).not.toHaveBeenCalled();
+
+      expect(
+        controller.applyImage(
+          { src: imageUrl, alt: "행사 포스터", width: 50 },
+          pendingMarkdown.length,
+        ),
+      ).toEqual({ status: "too_long" });
+      expect(controller.getMarkdown()).toBe(pendingMarkdown);
+      expect(onMarkdownChange).not.toHaveBeenCalled();
+
+      await vi.advanceTimersByTimeAsync(250);
+      expect(onMarkdownChange).toHaveBeenCalledOnce();
+      expect(onMarkdownChange).toHaveBeenCalledWith(pendingMarkdown);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("preserves earlier undo history when an image exceeds the limit", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const { controller } = await setup("본문");
+    __testing.selectText(controller, 1, 3);
+
+    vi.useFakeTimers();
+    try {
+      expect(controller.run("bold")).toBe(true);
+      const formattedMarkdown = controller.getMarkdown();
+      expect(formattedMarkdown).toBe("**본문**");
+      await vi.advanceTimersByTimeAsync(250);
+
+      expect(
+        controller.applyImage(
+          { src: imageUrl, alt: "행사 포스터", width: 50 },
+          formattedMarkdown.length,
+        ),
+      ).toEqual({ status: "too_long" });
+      expect(controller.getMarkdown()).toBe(formattedMarkdown);
+
+      expect(controller.run("undo")).toBe(true);
+      expect(controller.getMarkdown()).toBe("본문");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("inspects and replaces a selected image in one undoable change", async () => {
     const imageUrl =
       "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
@@ -360,6 +464,26 @@ describe("createMilkdownEditorController", () => {
       "alt",
       "대괄호 ] 괄호 ( ) 역슬래시 \\",
     );
+  });
+
+  it.each([
+    ["brackets", "대괄호 [열기]와 닫기 ]"],
+    ["emphasis", "*강조*와 _기울임_"],
+    ["code", "`코드` 표시"],
+    ["entities", "엔터티 &amp;와 &copy;"],
+    ["parentheses", "괄호 (안)과 (밖)"],
+    ["backslashes", "역슬래시 \\ 경로"],
+  ])("preserves %s in image alt text across a rich-editor round trip", async (_name, alt) => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const source = `![${escapeMarkdownAlt(alt)}](${imageUrl} "width=50")`;
+    const { controller } = await setup(source);
+
+    const serialized = controller.getMarkdown();
+    const caret = serialized.indexOf(imageUrl) + 5;
+    expect(
+      findSourceImageAtSelection(serialized, caret, caret),
+    ).toMatchObject({ src: imageUrl, alt, width: 50 });
   });
 
   it("removes a link when the link command has no URL payload", async () => {

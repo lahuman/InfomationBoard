@@ -24,11 +24,26 @@ export type MarkdownEditorController = {
   getMarkdown(): string;
   getSelectedImage(): SelectedEditorImage | null;
   replaceMarkdown(markdown: string): void;
+  applyImage(
+    payload: MarkdownEditorPayload,
+    maxLength: number,
+  ): ImageMutationResult;
   run(command: MarkdownEditorCommand, payload?: MarkdownEditorPayload): boolean;
   getToolbarState(): ToolbarState;
   focus(): void;
   destroy(): Promise<void>;
 };
+
+export type ImageMutationResult =
+  | { status: "applied"; markdown: string }
+  | {
+      status:
+        | "rejected"
+        | "unchanged"
+        | "too_long"
+        | "serialization_error"
+        | "restore_failed";
+    };
 
 export type SelectedEditorImage = {
   src: string;

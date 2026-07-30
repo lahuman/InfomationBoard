@@ -8,6 +8,11 @@ import {
 } from "@testing-library/react";
 import { expect, it, vi } from "vitest";
 import { MarkdownContentEditor } from "./markdown-content-editor";
+import {
+  __testing as milkdownTesting,
+  createMilkdownEditorController,
+} from "./milkdown-editor";
+import { findSourceImageAtSelection } from "./source-image";
 import type {
   CreateMarkdownEditorController,
   ImageEditorBridge,
@@ -64,7 +69,6 @@ function createFakeController(
   const run = vi.fn((command, payload) => {
     if (command === "image" && payload?.src) {
       markdown = `${markdown}\n![${payload.alt ?? ""}](${payload.src})`;
-      onMarkdownChange(markdown);
     }
     return true;
   });
@@ -79,6 +83,39 @@ function createFakeController(
     }
     return markdown;
   });
+  const applyImage = vi.fn(
+    (
+      payload: Parameters<MarkdownEditorController["applyImage"]>[0],
+      maxLength: number,
+    ): ReturnType<MarkdownEditorController["applyImage"]> => {
+      const previousMarkdown = markdown;
+      if (!run("image", payload)) return { status: "rejected" };
+
+      let nextMarkdown: string;
+      try {
+        nextMarkdown = getMarkdown();
+      } catch {
+        try {
+          replaceMarkdown(previousMarkdown);
+          return { status: "serialization_error" };
+        } catch {
+          return { status: "restore_failed" };
+        }
+      }
+      if (nextMarkdown === previousMarkdown) return { status: "unchanged" };
+      if (nextMarkdown.length > maxLength) {
+        try {
+          replaceMarkdown(previousMarkdown);
+          return { status: "too_long" };
+        } catch {
+          return { status: "restore_failed" };
+        }
+      }
+
+      onMarkdownChange(nextMarkdown);
+      return { status: "applied", markdown: nextMarkdown };
+    },
+  );
   const factory: CreateMarkdownEditorController = vi.fn(async (options) => {
     markdown = options.markdown;
     onMarkdownChange = options.onMarkdownChange;
@@ -86,6 +123,7 @@ function createFakeController(
       getMarkdown,
       getSelectedImage: () => selectedImage,
       replaceMarkdown,
+      applyImage,
       run,
       getToolbarState: () => toolbarState,
       focus,
@@ -94,6 +132,7 @@ function createFakeController(
   });
   return {
     factory,
+    applyImage,
     getMarkdown,
     run,
     focus,
@@ -105,7 +144,6 @@ function createFakeController(
     makeNextRunProduce: (next: string) => {
       run.mockImplementationOnce(() => {
         markdown = next;
-        onMarkdownChange(markdown);
         return true;
       });
     },
@@ -153,6 +191,145 @@ function renderWithImageInsertion(
   );
   return { ...rendered, bridge: () => bridge };
 }
+
+async function renderWithRealController(options: {
+  maxLength?: number;
+  onChange?: (markdown: string) => void;
+  value?: string;
+} = {}) {
+  let bridge: ImageEditorBridge | undefined;
+  let controller: MarkdownEditorController | undefined;
+  const factory: CreateMarkdownEditorController = async (controllerOptions) => {
+    controller = await createMilkdownEditorController(controllerOptions);
+    return controller;
+  };
+  const rendered = render(
+    <MarkdownContentEditor
+      createController={factory}
+      id="board-content"
+      imageLibrary={(nextBridge) => {
+        bridge = nextBridge;
+        return <span>이미지 라이브러리</span>;
+      }}
+      maxLength={options.maxLength ?? 200_000}
+      onChange={options.onChange ?? vi.fn()}
+      value={options.value ?? "본문"}
+    />,
+  );
+
+  await waitFor(() => expect(controller).toBeDefined());
+  return {
+    ...rendered,
+    bridge: () => bridge,
+    controller: () => controller!,
+  };
+}
+
+it("publishes an immediate rich-image undo and redo to parent state", async () => {
+  const onChange = vi.fn();
+  const rendered = await renderWithRealController({ onChange, value: "본문" });
+
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+    act(() => {
+      expect(
+        rendered.bridge()?.applyImage({
+          image,
+          alt: "행사 포스터",
+          width: 50,
+        }),
+      ).toBe(true);
+    });
+    const insertedMarkdown = rendered.controller().getMarkdown();
+    expect(onChange).toHaveBeenLastCalledWith(insertedMarkdown);
+
+    const undo = screen.getByRole("button", { name: "실행 취소" });
+    undo.focus();
+    fireEvent.click(undo);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(rendered.controller().getMarkdown()).toBe("본문");
+    expect(onChange).toHaveBeenLastCalledWith("본문");
+
+    const redo = screen.getByRole("button", { name: "다시 실행" });
+    redo.focus();
+    fireEvent.click(redo);
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(rendered.controller().getMarkdown()).toBe(insertedMarkdown);
+    expect(onChange).toHaveBeenLastCalledWith(insertedMarkdown);
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("restores an over-limit rich image before the listener can publish it", async () => {
+  const onChange = vi.fn();
+  const rendered = await renderWithRealController({
+    maxLength: 2,
+    onChange,
+    value: "본문",
+  });
+
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+    act(() => {
+      expect(
+        rendered.bridge()?.applyImage({
+          image,
+          alt: "행사 포스터",
+          width: 50,
+        }),
+      ).toBe(false);
+    });
+
+    expect(rendered.controller().getMarkdown()).toBe("본문");
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(rendered.controller().getMarkdown()).toBe("본문");
+    expect(onChange).not.toHaveBeenCalled();
+    expect(screen.getByRole("alert")).toHaveTextContent("2자까지");
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+it("rejects a rich image when real-controller candidate serialization fails", async () => {
+  const onChange = vi.fn();
+  const rendered = await renderWithRealController({ onChange, value: "본문" });
+  const controller = rendered.controller();
+  milkdownTesting.failNextImageSerialization(controller);
+
+  vi.useFakeTimers();
+  try {
+    fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+    act(() => {
+      expect(
+        rendered.bridge()?.applyImage({
+          image,
+          alt: "행사 포스터",
+          width: 50,
+        }),
+      ).toBe(false);
+    });
+
+    expect(controller.getMarkdown()).toBe("본문");
+    expect(onChange).not.toHaveBeenCalled();
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(250);
+    });
+    expect(controller.getMarkdown()).toBe("본문");
+    expect(onChange).not.toHaveBeenCalled();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 it("switches between rich text and Markdown source without losing edits", async () => {
   const editor = createFakeController();
@@ -295,6 +472,60 @@ it("replaces a captured source image without adding newlines", async () => {
   expect(bridge()?.open).toBe(false);
 });
 
+it.each(["caret", "range"] as const)(
+  "inserts a different source image after the complete captured node from a %s",
+  async (selectionKind) => {
+    const otherImage = {
+      ...image,
+      id: "22222222-2222-4222-8222-222222222222",
+      originalFilename: "map.png",
+      url: "/b/summer-market/images/22222222-2222-4222-8222-222222222222",
+    };
+    const firstNode = `![기존](${image.url} "width=25")`;
+    const initialMarkdown = `앞 ${firstNode} 뒤`;
+    const editor = createFakeController();
+    const { bridge } = renderWithImageInsertion(editor, {
+      value: initialMarkdown,
+    });
+
+    fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+    const source = screen.getByLabelText(
+      "본문 Markdown 원문",
+    ) as HTMLTextAreaElement;
+    const selectionStart =
+      selectionKind === "caret"
+        ? initialMarkdown.indexOf("기존") + 1
+        : initialMarkdown.indexOf(image.url) + 5;
+    const selectionEnd =
+      selectionKind === "caret" ? selectionStart : selectionStart + 10;
+    source.setSelectionRange(selectionStart, selectionEnd);
+    fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+
+    await act(async () => {
+      expect(
+        bridge()?.applyImage({
+          image: otherImage,
+          alt: "둘째",
+          width: 50,
+        }),
+      ).toBe(true);
+    });
+
+    const nextMarkdown = source.value;
+    const firstCaret = nextMarkdown.indexOf("기존") + 1;
+    const secondCaret = nextMarkdown.indexOf("둘째") + 1;
+    expect(
+      findSourceImageAtSelection(nextMarkdown, firstCaret, firstCaret),
+    ).toMatchObject({ src: image.url, alt: "기존", width: 25 });
+    expect(
+      findSourceImageAtSelection(nextMarkdown, secondCaret, secondCaret),
+    ).toMatchObject({ src: otherImage.url, alt: "둘째", width: 50 });
+    expect(nextMarkdown.indexOf(image.url)).toBeLessThan(
+      nextMarkdown.indexOf(otherImage.url),
+    );
+  },
+);
+
 it("inserts a width-aware source image at an unselected caret with necessary newlines", async () => {
   const editor = createFakeController();
   const onChange = vi.fn();
@@ -344,9 +575,21 @@ it("escapes source alt text and permits an explicitly decorative image", async (
       }),
     ).toBe(true);
   });
-  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
-    '![대괄호 \\] 괄호 \\( \\) 역슬래시 \\\\](/b/summer-market/images/11111111-1111-4111-8111-111111111111 "width=100")',
-  );
+  const informativeSource = screen.getByLabelText(
+    "본문 Markdown 원문",
+  ) as HTMLTextAreaElement;
+  const informativeCaret = informativeSource.value.indexOf(image.url) + 5;
+  expect(
+    findSourceImageAtSelection(
+      informativeSource.value,
+      informativeCaret,
+      informativeCaret,
+    ),
+  ).toMatchObject({
+    src: image.url,
+    alt: "대괄호 ] 괄호 ( ) 역슬래시 \\",
+    width: 100,
+  });
 
   first.unmount();
   const editorForDecorativeImage = createFakeController();
@@ -525,9 +768,9 @@ it("exposes pressed state only for selection-sensitive toolbar commands", async 
     />,
   );
 
-  expect(await screen.findByRole("button", { name: "굵게" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
+  const boldButton = await screen.findByRole("button", { name: "굵게" });
+  await waitFor(() =>
+    expect(boldButton).toHaveAttribute("aria-pressed", "true"),
   );
   expect(screen.getByRole("button", { name: "다시 실행" })).toBeDisabled();
   expect(screen.getByRole("button", { name: "구분선" })).not.toHaveAttribute(
@@ -723,6 +966,7 @@ it("reconciles an external value received while the controller is initializing",
       getMarkdown: () => markdown,
       getSelectedImage: () => null,
       replaceMarkdown,
+      applyImage: vi.fn(() => ({ status: "rejected" as const })),
       run: vi.fn(() => true),
       getToolbarState: () => defaultToolbarState,
       focus: vi.fn(),

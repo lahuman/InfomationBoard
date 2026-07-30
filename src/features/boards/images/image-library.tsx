@@ -127,6 +127,7 @@ export function ImageLibrary({
   const wasOpenRef = useRef(false);
   const deleteButtonRef = useRef<HTMLButtonElement>(null);
   const confirmDeleteRef = useRef<HTMLButtonElement>(null);
+  const manageDialogFocusRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     if (!bridge.open) {
@@ -162,6 +163,25 @@ export function ImageLibrary({
       return next;
     });
   }, [bridge.open, bridge.selectedImage, images]);
+
+  useEffect(() => {
+    if (!bridge.open || dialog !== "manage") return;
+
+    const target = manageDialogFocusRef.current;
+    const activeDialog = target?.closest<HTMLElement>('[role="dialog"]');
+    if (!target || !activeDialog) return;
+
+    const activeElement = document.activeElement;
+    if (
+      activeElement instanceof HTMLElement &&
+      activeDialog.contains(activeElement) &&
+      !activeElement.matches(":disabled")
+    ) {
+      return;
+    }
+
+    target.focus();
+  }, [bridge.open, dialog, inputKey, pendingOperation]);
 
   const uploadDisabled =
     pendingOperation !== null ||
@@ -550,7 +570,11 @@ export function ImageLibrary({
               </p>
             )}
             <div className="image-library-dialog-actions">
-              <button onClick={bridge.close} type="button">
+              <button
+                onClick={bridge.close}
+                ref={manageDialogFocusRef}
+                type="button"
+              >
                 닫기
               </button>
             </div>

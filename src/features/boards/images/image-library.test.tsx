@@ -349,6 +349,54 @@ describe("ImageLibrary", () => {
     expect(screen.getByText("4 B / 50 MB")).toBeVisible();
   });
 
+  it("keeps enabled focus inside the modal while upload disables and remounts its input", async () => {
+    let resolveUpload: ((result: UploadBoardImageResult) => void) | undefined;
+    const uploadResult = new Promise<UploadBoardImageResult>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploadedImage: BoardImage = {
+      id: "50000000-0000-4000-8000-000000000005",
+      originalFilename: "new.gif",
+      mimeType: "image/gif",
+      sizeBytes: 4,
+      url: "/b/summer-market/images/50000000-0000-4000-8000-000000000005",
+    };
+    renderLibrary({
+      initialLibrary: { images: [], storageBytes: 0 },
+      uploadImage: vi.fn(() => uploadResult),
+    });
+    const fileInput = screen.getByLabelText("이미지 추가");
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "new.gif", {
+      type: "image/gif",
+    });
+
+    fileInput.focus();
+    fireEvent.change(fileInput, { target: { files: [file] } });
+    expect(await screen.findByRole("status")).toHaveTextContent("업로드 중");
+    const dialog = screen.getByRole("dialog", { name: "이미지 관리" });
+    await waitFor(() => {
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect((document.activeElement as HTMLElement).matches(":disabled")).toBe(
+        false,
+      );
+    });
+
+    await act(async () => {
+      resolveUpload?.({
+        status: "ready",
+        image: uploadedImage,
+        storageBytes: 4,
+      });
+      await uploadResult;
+    });
+    await waitFor(() => {
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect((document.activeElement as HTMLElement).matches(":disabled")).toBe(
+        false,
+      );
+    });
+  });
+
   it("shows browser validation and retryable upload errors without adding a row", async () => {
     const user = userEvent.setup();
     const rendered = renderLibrary({
@@ -471,6 +519,47 @@ describe("ImageLibrary", () => {
         screen.getByRole("button", { name: "poster.png 삭제" }),
       ).toHaveFocus(),
     );
+  });
+
+  it("never moves focus outside while switching management and delete dialogs", async () => {
+    const user = userEvent.setup();
+    const outsideButton = document.createElement("button");
+    outsideButton.textContent = "대화 상자 밖";
+    document.body.append(outsideButton);
+    outsideButton.focus();
+    const focusTargets: EventTarget[] = [];
+    const recordFocus = (event: FocusEvent) => focusTargets.push(event.target!);
+    document.addEventListener("focusin", recordFocus);
+
+    try {
+      renderLibrary();
+      await waitFor(() =>
+        expect(screen.getByLabelText("이미지 추가")).toHaveFocus(),
+      );
+      focusTargets.length = 0;
+
+      await user.click(
+        screen.getByRole("button", { name: "poster.png 삭제" }),
+      );
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "poster.png 삭제 확인" }),
+        ).toHaveFocus(),
+      );
+      expect(focusTargets).not.toContain(outsideButton);
+
+      focusTargets.length = 0;
+      await user.click(screen.getByRole("button", { name: "취소" }));
+      await waitFor(() =>
+        expect(
+          screen.getByRole("button", { name: "poster.png 삭제" }),
+        ).toHaveFocus(),
+      );
+      expect(focusTargets).not.toContain(outsideButton);
+    } finally {
+      document.removeEventListener("focusin", recordFocus);
+      outsideButton.remove();
+    }
   });
 
   it("treats delete-dialog Escape as cancel without bubbling a bridge close", async () => {
@@ -608,6 +697,44 @@ describe("ImageLibrary", () => {
     expect(screen.queryByText("poster.png")).not.toBeInTheDocument();
     expect(screen.getByText("256 KB / 50 MB")).toBeVisible();
     expect(onBoardRevision).toHaveBeenCalledWith(8);
+  });
+
+  it("keeps enabled focus inside the modal while delete removes the confirm control", async () => {
+    const user = userEvent.setup();
+    let resolveDelete: ((result: DeleteBoardImageResult) => void) | undefined;
+    const deleteResult = new Promise<DeleteBoardImageResult>((resolve) => {
+      resolveDelete = resolve;
+    });
+    deleteImageAction.mockReturnValueOnce(deleteResult);
+    renderLibrary();
+
+    await user.click(
+      screen.getByRole("button", { name: "poster.png 삭제" }),
+    );
+    await user.click(
+      screen.getByRole("button", { name: "poster.png 삭제 확인" }),
+    );
+    const dialog = screen.getByRole("dialog", { name: "이미지 관리" });
+    await waitFor(() => {
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect((document.activeElement as HTMLElement).matches(":disabled")).toBe(
+        false,
+      );
+    });
+
+    await act(async () => {
+      resolveDelete?.({
+        status: "error",
+        message: "이미지를 삭제하지 못했습니다. 다시 시도해 주세요.",
+      });
+      await deleteResult;
+    });
+    await waitFor(() => {
+      expect(dialog).toContainElement(document.activeElement as HTMLElement);
+      expect((document.activeElement as HTMLElement).matches(":disabled")).toBe(
+        false,
+      );
+    });
   });
 
   it("treats an irreversible deletion without refreshed usage as deleted and reconciles locally", async () => {

@@ -21,11 +21,13 @@ export type SourceImageSelection = {
 type SourceImageInput = Pick<SourceImageSelection, "src" | "alt" | "width">;
 
 export function escapeMarkdownAlt(alt: string): string {
-  return alt
-    .replaceAll("\\", "\\\\")
-    .replaceAll("]", "\\]")
-    .replaceAll("(", "\\(")
-    .replaceAll(")", "\\)");
+  return alt.replace(/[\\[\]*_`&<>()~!]/g, (character) =>
+    `&#${character.codePointAt(0)};`,
+  );
+}
+
+export function serializeSourceImage(input: SourceImageInput): string {
+  return `![${escapeMarkdownAlt(input.alt)}](${input.src} "${serializeImageWidthTitle(input.width)}")`;
 }
 
 function sourceImageSelection(node: Image): SourceImageSelection | null {
@@ -96,6 +98,17 @@ export function replaceSourceImage(
 ): string {
   if (!selectionStillMatches(markdown, selection)) return markdown;
 
-  const replacement = `![${escapeMarkdownAlt(input.alt)}](${input.src} "${serializeImageWidthTitle(input.width)}")`;
+  const replacement = serializeSourceImage(input);
   return `${markdown.slice(0, selection.from)}${replacement}${markdown.slice(selection.to)}`;
+}
+
+export function insertSourceImageAfter(
+  markdown: string,
+  selection: SourceImageSelection,
+  input: SourceImageInput,
+): string {
+  if (!selectionStillMatches(markdown, selection)) return markdown;
+
+  const insertion = serializeSourceImage(input);
+  return `${markdown.slice(0, selection.to)}${insertion}${markdown.slice(selection.to)}`;
 }

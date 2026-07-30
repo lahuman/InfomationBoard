@@ -16,13 +16,13 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
-import { serializeImageWidthTitle } from "../../images/presentation";
 import { sanitizeBoardImageUrl } from "../../markdown/url";
 import { createMilkdownEditorController } from "./milkdown-editor";
 import {
-  escapeMarkdownAlt,
   findSourceImageAtSelection,
+  insertSourceImageAfter,
   replaceSourceImage,
+  serializeSourceImage,
   type SourceImageSelection,
 } from "./source-image";
 import type {
@@ -130,7 +130,6 @@ export function MarkdownContentEditor({
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const maxLengthRef = useRef(maxLength);
-  const richImageMutationInProgressRef = useRef(false);
   const [mode, setMode] = useState<EditorMode>("rich");
   const [sourceValue, setSourceValue] = useState(value);
   const [toolbarState, setToolbarState] = useState(defaultToolbarState);
@@ -174,7 +173,6 @@ export function MarkdownContentEditor({
       ariaLabelledBy: `${id}-label`,
       ariaDescribedBy: `${id}-rich-help`,
       onMarkdownChange: (nextMarkdown) => {
-        if (richImageMutationInProgressRef.current) return;
         if (nextMarkdown === latestValueRef.current) return;
         if (nextMarkdown.length <= maxLengthRef.current) {
           latestValueRef.current = nextMarkdown;
@@ -337,59 +335,31 @@ export function MarkdownContentEditor({
       const controller = controllerRef.current;
       if (!controller) return false;
 
-      const previousMarkdown = latestValueRef.current;
-      richImageMutationInProgressRef.current = true;
-      try {
-        const didInsert = controller.run("image", {
+      const result = controller.applyImage(
+        {
           src: image.url,
           alt,
           width,
           replaceSelectedImage: selectedImage?.src === image.url,
-        });
-        if (!didInsert) return false;
-
-        let nextMarkdown: string;
-        try {
-          nextMarkdown = controller.getMarkdown();
-        } catch {
-          latestValueRef.current = previousMarkdown;
-          setSourceValue(previousMarkdown);
-          try {
-            controller.replaceMarkdown(previousMarkdown);
-          } catch {
-            setMode("source");
-            setError(conversionError);
-            return false;
-          }
-          return false;
-        }
-        if (nextMarkdown === previousMarkdown) return false;
-
-        if (nextMarkdown.length > maxLengthRef.current) {
-          latestValueRef.current = previousMarkdown;
-          setSourceValue(previousMarkdown);
-          try {
-            controller.replaceMarkdown(previousMarkdown);
-          } catch {
-            setMode("source");
-            setError(conversionError);
-            return false;
-          }
-          setError(characterLimitError(maxLengthRef.current));
-          return false;
-        }
-
-        latestValueRef.current = nextMarkdown;
-        setSourceValue(nextMarkdown);
-        onChangeRef.current(nextMarkdown);
-        setError("");
-        setImageModalOpen(false);
-        setSelectedImage(null);
-        controller.focus();
-        return true;
-      } finally {
-        richImageMutationInProgressRef.current = false;
+        },
+        maxLengthRef.current,
+      );
+      if (result.status === "too_long") {
+        setError(characterLimitError(maxLengthRef.current));
+        return false;
       }
+      if (result.status === "restore_failed") {
+        setMode("source");
+        setError(conversionError);
+        return false;
+      }
+      if (result.status !== "applied") return false;
+
+      setError("");
+      setImageModalOpen(false);
+      setSelectedImage(null);
+      controller.focus();
+      return true;
     }
 
     const source = sourceRef.current;
@@ -400,12 +370,19 @@ export function MarkdownContentEditor({
     let nextMarkdown: string;
     let nextSelection: number;
 
-    if (capturedSourceImage?.src === image.url) {
-      nextMarkdown = replaceSourceImage(currentValue, capturedSourceImage, {
-        src: image.url,
-        alt,
-        width,
-      });
+    if (capturedSourceImage) {
+      nextMarkdown =
+        capturedSourceImage.src === image.url
+          ? replaceSourceImage(currentValue, capturedSourceImage, {
+              src: image.url,
+              alt,
+              width,
+            })
+          : insertSourceImageAfter(currentValue, capturedSourceImage, {
+              src: image.url,
+              alt,
+              width,
+            });
       nextSelection =
         capturedSourceImage.to + (nextMarkdown.length - currentValue.length);
     } else {
@@ -413,7 +390,7 @@ export function MarkdownContentEditor({
       const end = source.selectionEnd;
       const before = currentValue.slice(0, start);
       const after = currentValue.slice(end);
-      const markdown = `![${escapeMarkdownAlt(alt)}](${image.url} "${serializeImageWidthTitle(width)}")`;
+      const markdown = serializeSourceImage({ src: image.url, alt, width });
       const prefix = before && !before.endsWith("\n") ? "\n" : "";
       const suffix = after && !after.startsWith("\n") ? "\n" : "";
       nextMarkdown = `${before}${prefix}${markdown}${suffix}${after}`;

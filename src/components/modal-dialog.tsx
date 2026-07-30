@@ -10,13 +10,32 @@ import {
 } from "react";
 
 const FOCUSABLE = [
-  "button:not([disabled])",
-  "input:not([disabled])",
-  "select:not([disabled])",
-  "textarea:not([disabled])",
+  "button:enabled",
+  "input:enabled",
+  "select:enabled",
+  "textarea:enabled",
   "a[href]",
-  '[tabindex]:not([tabindex="-1"])',
+  '[tabindex]:not([tabindex="-1"]):not(:disabled)',
 ].join(",");
+
+function focusInsideDialog(
+  dialog: HTMLElement,
+  requestedTarget?: HTMLElement | null,
+) {
+  const requestedTargetIsUsable =
+    requestedTarget?.isConnected &&
+    dialog.contains(requestedTarget) &&
+    !requestedTarget.matches(":disabled");
+  const target =
+    (requestedTargetIsUsable ? requestedTarget : null) ??
+    dialog.querySelector<HTMLElement>(FOCUSABLE) ??
+    dialog;
+  target.focus();
+
+  if (!dialog.contains(document.activeElement)) {
+    dialog.focus();
+  }
+}
 
 type ModalDialogProps = {
   children: ReactNode;
@@ -39,6 +58,8 @@ export function ModalDialog({
 }: ModalDialogProps) {
   const dialogRef = useRef<HTMLElement>(null);
   const previouslyFocusedRef = useRef<HTMLElement | null>(null);
+  const latestReturnFocusRef = useRef(returnFocusRef);
+  latestReturnFocusRef.current = returnFocusRef;
 
   useEffect(() => {
     if (!open) {
@@ -49,14 +70,8 @@ export function ModalDialog({
     previouslyFocusedRef.current =
       activeElement instanceof HTMLElement ? activeElement : null;
 
-    const initialFocusTarget =
-      initialFocusRef?.current ??
-      dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
-      dialogRef.current;
-    initialFocusTarget?.focus();
-
     return () => {
-      const returnFocusTarget = returnFocusRef?.current;
+      const returnFocusTarget = latestReturnFocusRef.current?.current;
       if (returnFocusTarget?.isConnected) {
         returnFocusTarget.focus();
         return;
@@ -66,7 +81,14 @@ export function ModalDialog({
         previouslyFocusedRef.current.focus();
       }
     };
-  }, [initialFocusRef, open, returnFocusRef]);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+
+    const dialog = dialogRef.current;
+    if (dialog) focusInsideDialog(dialog, initialFocusRef?.current);
+  }, [initialFocusRef, open]);
 
   if (!open) {
     return null;

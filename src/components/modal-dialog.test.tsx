@@ -53,6 +53,33 @@ function EmptyDialogHarness() {
   );
 }
 
+function DisabledFieldsetHarness() {
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <button onClick={() => setOpen(true)} type="button">
+        비활성 항목 대화 상자 열기
+      </button>
+      <ModalDialog
+        onClose={() => setOpen(false)}
+        open={open}
+        title="업로드 처리 중"
+        titleId="disabled-fieldset-dialog-title"
+      >
+        <fieldset disabled>
+          <legend>선택할 수 없는 크기</legend>
+          <label>
+            <input name="disabled-size" type="radio" />
+            비활성 크기
+          </label>
+        </fieldset>
+        <button type="button">사용 가능한 작업</button>
+      </ModalDialog>
+    </>
+  );
+}
+
 describe("ModalDialog", () => {
   it("presents a labelled modal dialog and moves focus to its initial action", async () => {
     render(<Harness />);
@@ -99,6 +126,21 @@ describe("ModalDialog", () => {
 
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(dialog).toHaveFocus();
+  });
+
+  it("skips controls disabled through a fieldset and lands focus inside", async () => {
+    render(<DisabledFieldsetHarness />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "비활성 항목 대화 상자 열기" }),
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "업로드 처리 중" });
+    const enabledTarget = screen.getByRole("button", {
+      name: "사용 가능한 작업",
+    });
+    await waitFor(() => expect(enabledTarget).toHaveFocus());
+    expect(dialog).toContainElement(document.activeElement as HTMLElement);
+    expect(document.activeElement).toBeEnabled();
   });
 
   it("closes on Escape and returns focus to the trigger", async () => {
