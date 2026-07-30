@@ -105,3 +105,100 @@ marked the settled Task 5 diff ready.
 No implementation blocker remains. The only observed instability was the local
 Supabase CLI connection timeout described above; the database and final pgTAP
 assertions themselves passed.
+
+---
+
+## Fix Round 1
+
+Status: Complete.
+
+Implementation commit: `ed9e484d0cc1b26c7ea94eb9570a04f7f67c0413`
+
+### Review Findings Resolved
+
+1. Replaced `finalize_board_image` in the deletion migration with an explicit
+   lifecycle gate. Identical `ready` finalization remains idempotent, only
+   `reserved` may transition to `ready`, and `cancelling`/`deleting` return
+   stable distinct errors. A delayed finalize can no longer resurrect a
+   claimed deletion.
+2. Added authoritative post-claim recovery. Thrown, errored, malformed, or
+   mismatched claim responses re-read the owned board and attachment. A
+   confirmed `deleting` row returns a safe error with the current revision; an
+   absent row returns `deleted` with the current revision.
+3. Added board batch-removal recovery. A failed batch falls back to every
+   server-resolved path individually. Only success or the exact object-missing
+   response for every path permits service-role completion; bucket, route,
+   authorization, and other failures remain fail-closed.
+4. Replaced the synthetic row-lock test with actual authenticated dblink
+   transactions. The test executes `reserve_board_image`, the real
+   `storage.objects` INSERT policy, and `claim_board_deletion` under JWT/role
+   context in both race directions.
+5. Made `storageBytes` optional on `deleted`. Once service-role completion
+   succeeds, a later profile usage read failure cannot turn the irreversible
+   deletion back into an error. Task 8 documentation now removes the row on
+   every `deleted` result and refreshes/recomputes usage when bytes are absent.
+
+### RED Evidence
+
+- Command:
+  `npm run test:run -- src/features/boards/images/actions/delete-image.test.ts src/features/boards/actions/delete-board.test.ts`
+  Result: 2 files failed; 6 expected behavior tests failed and 20 passed. The
+  failures covered irreversible completion followed by usage failure,
+  thrown/malformed/mismatched claim recovery, successful per-path retry after
+  batch 404, and fail-closed individual non-object 404 handling.
+- Command:
+  `docker exec supabase_db_InfomationBoard psql -v ON_ERROR_STOP=1 -U postgres -d postgres -f /tmp/phase5_board_images.fix1-red.test.sql`
+  Result: the new finalize assertions failed exactly as expected: finalize
+  raised no exception and changed `deleting` back to `ready`. Four later
+  assertions also failed as consequences because trusted deletion could no
+  longer complete and quota remained charged.
+
+The first execution of the expanded concurrency test exposed only test-fixture
+issues: Storage's direct-delete guard required its documented test-only
+`storage.allow_delete_query` setting, and dblink omitted the SQLSTATE prefix
+from one error string. After correcting those harness expectations, no
+production change was needed for the already-correct board lock behavior.
+
+### GREEN Evidence
+
+- `npx supabase db reset --local`: passed from a clean database and applied all
+  migrations including the hardened deletion migration.
+- `npx supabase test db`: all 5 pgTAP files and 175 assertions passed. This
+  includes 104 phase 5 lifecycle assertions and all 18 real two-session
+  concurrency assertions.
+- The 18 concurrency assertions prove:
+  - a real reservation RPC holds the board lock, blocks deletion, commits, and
+    leaves its attachment path visible before the claim proceeds;
+  - a real Storage INSERT policy evaluation holds the same lock, blocks
+    deletion, commits, and leaves the object joined to its attachment path;
+  - a deletion claim that wins first makes the real reservation RPC return
+    `image_not_found` and makes the real Storage INSERT fail RLS.
+- Command:
+  `npm run test:run -- src/features/boards/images/actions/delete-image.test.ts src/features/boards/actions/delete-board.test.ts src/features/boards/images/actions/finalize-image.test.ts src/features/boards/images/storage.test.ts src/features/boards/images/references.test.ts`
+  Result: 5 files and 53 tests passed.
+- `npx supabase db lint`: passed with `No schema errors found`.
+- Clean-schema type generation matched
+  `src/lib/supabase/database.types.ts`; the only textual difference was a
+  trailing blank line, so no generated type change was required.
+- `npm run verify`: passed lint, TypeScript, all 64 Vitest files and 304 tests,
+  the production Next.js build, and the client-secret artifact scan.
+- `git diff --cached --check`: passed before the implementation commit.
+
+### Fix Round 1 Self-Review
+
+- Mutation of the finalize `deleting` branch back to the legacy fallthrough is
+  caught by both the stable-error and persisted-state pgTAP assertions.
+- Removing authoritative recovery loses revisions or deleted outcomes in three
+  focused action tests.
+- Treating batch 404 as either unconditional success or unconditional failure
+  is caught by the per-path success and non-object fail-closed tests.
+- Replacing either actual reservation or Storage INSERT with a synthetic lock
+  removes observable function/policy outcomes from the dblink suite.
+- Returning an error after successful completion is caught by the usage-read
+  failure test.
+
+### Fix Round 1 Remaining Concerns
+
+No implementation blocker remains. `npx supabase db lint` encountered one
+intermittent legacy PostgreSQL connection timeout immediately after reset; the
+healthy DB status was confirmed and the unchanged command passed on retry.
