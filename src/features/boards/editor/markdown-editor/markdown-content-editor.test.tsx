@@ -57,7 +57,13 @@ function createFakeController(
 ) {
   let markdown = "";
   let onMarkdownChange: (next: string) => void = () => undefined;
-  const run = vi.fn(() => true);
+  const run = vi.fn((command, payload) => {
+    if (command === "image" && payload?.src) {
+      markdown = `${markdown}\n![${payload.alt ?? ""}](${payload.src})`;
+      onMarkdownChange(markdown);
+    }
+    return true;
+  });
   const focus = vi.fn();
   const replaceMarkdown = vi.fn((next: string) => {
     markdown = next;
@@ -80,6 +86,12 @@ function createFakeController(
     focus,
     replaceMarkdown,
     emitMarkdown: (next: string) => onMarkdownChange(next),
+    makeNextRunProduce: (next: string) => {
+      run.mockImplementationOnce(() => {
+        markdown = next;
+        return true;
+      });
+    },
   };
 }
 
@@ -149,6 +161,28 @@ it("bridges a rich image insertion to the controller and restores editor focus",
     alt: "행사 포스터",
   });
   expect(editor.focus).toHaveBeenCalled();
+});
+
+it("does not report a rich image insertion as successful when it must roll back at 200,000 characters", async () => {
+  const initialMarkdown = "x".repeat(200_000);
+  const editor = createFakeController();
+  editor.makeNextRunProduce(
+    `${initialMarkdown}\n![행사 포스터](${image.url})`,
+  );
+  const onChange = vi.fn();
+  const { insertImage } = renderWithImageInsertion(editor, {
+    maxLength: 200_000,
+    onChange,
+    value: initialMarkdown,
+  });
+
+  await screen.findByRole("button", { name: "이미지" });
+  await act(async () => {
+    expect(insertImage()?.(image, "행사 포스터")).toBe(false);
+  });
+  expect(editor.replaceMarkdown).toHaveBeenCalledWith(initialMarkdown);
+  expect(onChange).not.toHaveBeenCalled();
+  expect(screen.getByRole("alert")).toHaveTextContent("200,000자까지");
 });
 
 it("inserts source image Markdown at the textarea selection with necessary newlines", async () => {

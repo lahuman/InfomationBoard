@@ -571,3 +571,61 @@ it("keeps a deletion revision fence when an older in-flight save resolves later"
     expect.objectContaining({ revision: 4, title: "삭제 뒤 다음 저장" }),
   );
 });
+
+it("keeps a newer deletion revision when an older publication response resolves later", async () => {
+  let resolvePublication:
+    | ((result: PublishBoardResult) => void)
+    | undefined;
+  const publication = new Promise<PublishBoardResult>((resolve) => {
+    resolvePublication = resolve;
+  });
+  const publish = vi.fn(() => publication);
+  const update = vi.fn(async (): Promise<UpdateBoardResult> => ({
+    status: "saved",
+    revision: 5,
+    updatedAt: "2026-07-28T10:04:00.000Z",
+  }));
+  render(
+    <BoardEditor
+      board={initialBoard}
+      cancelImageAction={vi.fn()}
+      canonicalUrl={publicationProps.canonicalUrl}
+      deleteBoardAction={vi.fn()}
+      deleteImageAction={vi.fn()}
+      finalizeImageAction={vi.fn()}
+      initialImageLibrary={initialImageLibrary}
+      publishBoardAction={publish}
+      reserveImageAction={vi.fn()}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("radio", { name: /전체 공개/ }));
+  fireEvent.click(screen.getByRole("button", { name: "게시 설정 저장" }));
+
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+  const imageLibraryProps = imageLibraryMocks.component.mock.lastCall?.[0] as {
+    onBoardRevision(revision: number): void;
+  };
+  act(() => imageLibraryProps.onBoardRevision(4));
+
+  await act(async () => {
+    resolvePublication?.({
+      status: "saved",
+      revision: 3,
+      updatedAt: "2026-07-28T10:03:00.000Z",
+    });
+    await publication;
+  });
+
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "게시 응답 뒤 수정" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+
+  expect(update).toHaveBeenLastCalledWith(
+    expect.objectContaining({ revision: 4, title: "게시 응답 뒤 수정" }),
+  );
+});

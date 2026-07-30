@@ -134,6 +134,13 @@ export function BoardEditor({
   draftRef.current = draft;
   revisionRef.current = revision;
 
+  const applyRevisionFence = useCallback((candidateRevision: number) => {
+    const nextRevision = Math.max(revisionRef.current, candidateRevision);
+    revisionRef.current = nextRevision;
+    setRevision(nextRevision);
+    return nextRevision;
+  }, []);
+
   const runSave = useCallback(async () => {
     if (inFlightRef.current) {
       queuedRef.current = true;
@@ -165,12 +172,7 @@ export function BoardEditor({
     }
 
     if (result.status === "saved") {
-      const nextRevision = Math.max(
-        revisionRef.current,
-        result.revision,
-      );
-      revisionRef.current = nextRevision;
-      setRevision(nextRevision);
+      applyRevisionFence(result.revision);
       setConflict(null);
 
       const hasNewerDraft =
@@ -202,7 +204,7 @@ export function BoardEditor({
       draft: draftRef.current,
     });
     inFlightRef.current = false;
-  }, [board.id, updateBoardAction]);
+  }, [applyRevisionFence, board.id, updateBoardAction]);
 
   runSaveRef.current = runSave;
 
@@ -411,10 +413,7 @@ export function BoardEditor({
                       deleteImageAction={deleteImageAction}
                       finalizeImageAction={finalizeImageAction}
                       initialLibrary={initialImageLibrary}
-                      onBoardRevision={(nextRevision) => {
-                        revisionRef.current = nextRevision;
-                        setRevision(nextRevision);
-                      }}
+                      onBoardRevision={applyRevisionFence}
                       onInsert={insertImage}
                       reserveImageAction={reserveImageAction}
                     />
@@ -499,10 +498,7 @@ export function BoardEditor({
         board={board}
         canonicalUrl={canonicalUrl}
         revision={revision}
-        onRevisionChange={(nextRevision) => {
-          revisionRef.current = nextRevision;
-          setRevision(nextRevision);
-        }}
+        onRevisionChange={applyRevisionFence}
         publishBoardAction={publishBoardAction}
       />
 

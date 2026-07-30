@@ -169,6 +169,7 @@ export function MarkdownContentEditor({
       ariaLabelledBy: `${id}-label`,
       ariaDescribedBy: `${id}-rich-help`,
       onMarkdownChange: (nextMarkdown) => {
+        if (nextMarkdown === latestValueRef.current) return;
         if (nextMarkdown.length <= maxLengthRef.current) {
           latestValueRef.current = nextMarkdown;
           setSourceValue(nextMarkdown);
@@ -291,9 +292,41 @@ export function MarkdownContentEditor({
       const controller = controllerRef.current;
       if (!controller) return false;
 
+      const previousMarkdown = latestValueRef.current;
       const didInsert = controller.run("image", { src: image.url, alt });
-      if (didInsert) controller.focus();
-      return didInsert;
+      if (!didInsert) return false;
+
+      let nextMarkdown: string;
+      try {
+        nextMarkdown = controller.getMarkdown();
+      } catch {
+        return false;
+      }
+      if (
+        nextMarkdown === previousMarkdown ||
+        nextMarkdown.length > maxLengthRef.current
+      ) {
+        try {
+          controller.replaceMarkdown(previousMarkdown);
+        } catch {
+          setMode("source");
+          setError(conversionError);
+          return false;
+        }
+        latestValueRef.current = previousMarkdown;
+        setSourceValue(previousMarkdown);
+        setError(characterLimitError(maxLengthRef.current));
+        return false;
+      }
+
+      if (latestValueRef.current !== nextMarkdown) {
+        latestValueRef.current = nextMarkdown;
+        setSourceValue(nextMarkdown);
+        onChangeRef.current(nextMarkdown);
+      }
+      setError("");
+      controller.focus();
+      return true;
     }
 
     const source = sourceRef.current;
