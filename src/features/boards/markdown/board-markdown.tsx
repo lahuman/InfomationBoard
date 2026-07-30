@@ -2,6 +2,10 @@ import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
 import {
+  imageWidthClass,
+  parseImageWidthTitle,
+} from "../images/presentation";
+import {
   isExternalBoardUrl,
   sanitizeBoardImageUrl,
   sanitizeBoardUrl,
@@ -87,15 +91,17 @@ const BOARD_MARKDOWN_COMPONENTS: Components = {
     );
     if (!safeSrc) return null;
 
+    const width = parseImageWidthTitle(title);
+
     return (
       // Markdown images use access-controlled or author-supplied URLs.
       // eslint-disable-next-line @next/next/no-img-element
       <img
         alt={alt ?? ""}
+        className={imageWidthClass(width)}
         decoding="async"
         loading="lazy"
         src={safeSrc}
-        title={title}
       />
     );
   },

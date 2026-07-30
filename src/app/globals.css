@@ -544,6 +544,22 @@ body {
   height: auto;
 }
 
+.board-markdown img.board-image-width-25 {
+  width: 25%;
+}
+
+.board-markdown img.board-image-width-50 {
+  width: 50%;
+}
+
+.board-markdown img.board-image-width-75 {
+  width: 75%;
+}
+
+.board-markdown img.board-image-width-100 {
+  width: 100%;
+}
+
 a {
   color: inherit;
 }

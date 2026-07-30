@@ -56,6 +56,29 @@ describe("BoardMarkdown", () => {
     expect(image).toHaveAttribute("decoding", "async");
   });
 
+  it("renders an allowlisted image width without exposing its Markdown title", () => {
+    const src = "https://images.example.com/poster.png";
+
+    render(<BoardMarkdown markdown={`![포스터](${src} "width=50")`} />);
+
+    expect(screen.getByRole("img", { name: "포스터" })).toHaveClass(
+      "board-image-width-50",
+    );
+    expect(screen.getByRole("img", { name: "포스터" })).not.toHaveAttribute(
+      "title",
+    );
+  });
+
+  it("uses the default width when an image title is not allowlisted", () => {
+    const secondSrc = "https://images.example.com/default.png";
+
+    render(<BoardMarkdown markdown={`![기본](${secondSrc} "width=80")`} />);
+
+    expect(screen.getByRole("img", { name: "기본" })).toHaveClass(
+      "board-image-width-100",
+    );
+  });
+
   it.each([
     ["JavaScript", "javascript:alert(1)"],
     ["data", "data:image/png;base64,iVBORw0KGgo="],
