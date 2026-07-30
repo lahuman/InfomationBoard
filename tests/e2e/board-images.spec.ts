@@ -75,6 +75,9 @@ test.describe("board image upload, insertion, access, and deletion", () => {
         anonymous = await browser.newContext();
 
         await page.getByRole("button", { name: "이미지" }).click();
+        await expect(
+          page.getByRole("dialog", { name: "이미지 관리" }),
+        ).toBeVisible();
         const usageMeter = page.locator(
           'meter[aria-label="이미지 저장공간 사용량"]',
         );
@@ -95,19 +98,23 @@ test.describe("board image upload, insertion, access, and deletion", () => {
         await page
           .getByLabel(`${fixtureName} 대체 텍스트`)
           .fill("E2E poster");
+        await page
+          .getByRole("radio", { name: "본문 너비의 50%" })
+          .check();
         await page.getByRole("button", { name: `${fixtureName} 삽입` }).click();
         const editorPreview = page.locator(".editor-preview-panel");
-        await expect(
-          editorPreview.getByRole("img", { name: "E2E poster" }),
-        ).toBeVisible();
+        const insertedPreviewImage = editorPreview.getByRole("img", {
+          name: "E2E poster",
+        });
+        await expect(insertedPreviewImage).toBeVisible();
+        await expect(insertedPreviewImage).toHaveClass(
+          "board-image-width-50",
+        );
         await expect(page.locator(".save-state")).toHaveText("저장됨", {
           timeout: 10_000,
         });
 
-        const imagePath = await page
-          .locator(".editor-preview-panel")
-          .getByRole("img", { name: "E2E poster" })
-          .getAttribute("src");
+        const imagePath = await insertedPreviewImage.getAttribute("src");
         const canonicalUrl = await page
           .locator(".publication-url a")
           .getAttribute("href");
@@ -118,11 +125,36 @@ test.describe("board image upload, insertion, access, and deletion", () => {
         const imageUrl = new URL(imagePath!, canonicalUrl!).toString();
 
         await page.reload();
+        await page.getByRole("tab", { name: "리치 텍스트" }).click();
+        const richEditorImage = page
+          .getByRole("tabpanel", { name: "리치 텍스트" })
+          .locator(".ProseMirror")
+          .getByRole("img", { name: "E2E poster" });
+        await expect(richEditorImage).toBeVisible();
+        await richEditorImage.click();
+        await expect(richEditorImage).toHaveClass(/ProseMirror-selectednode/);
+
+        await page.getByRole("button", { name: "이미지" }).click();
         await expect(
-          page
-            .locator(".editor-preview-panel")
-            .getByRole("img", { name: "E2E poster" }),
+          page.getByRole("dialog", { name: "이미지 관리" }),
         ).toBeVisible();
+        await page
+          .getByLabel(`${fixtureName} 대체 텍스트`)
+          .fill("E2E resized poster");
+        await page
+          .getByRole("radio", { name: "본문 너비의 25%" })
+          .check();
+        await page.getByRole("button", { name: "이미지 수정" }).click();
+        const resizedPreviewImage = editorPreview.getByRole("img", {
+          name: "E2E resized poster",
+        });
+        await expect(resizedPreviewImage).toBeVisible();
+        await expect(resizedPreviewImage).toHaveClass(
+          "board-image-width-25",
+        );
+        await expect(page.locator(".save-state")).toHaveText("저장됨", {
+          timeout: 10_000,
+        });
 
         await page.getByRole("radio", { name: /^전체 공개/ }).check();
         await page.getByRole("button", { name: "게시 설정 저장" }).click();
@@ -130,9 +162,11 @@ test.describe("board image upload, insertion, access, and deletion", () => {
 
         const visitor = await anonymous.newPage();
         await visitor.goto(canonicalUrl!);
-        await expect(
-          visitor.getByRole("img", { name: "E2E poster" }),
-        ).toBeVisible();
+        const visitorImage = visitor.getByRole("img", {
+          name: "E2E resized poster",
+        });
+        await expect(visitorImage).toBeVisible();
+        await expect(visitorImage).toHaveClass("board-image-width-25");
         expect((await visitor.request.get(imageUrl)).status()).toBe(200);
 
         await page.getByRole("radio", { name: /^비공개 초안/ }).check();
@@ -165,14 +199,22 @@ test.describe("board image upload, insertion, access, and deletion", () => {
           timeout: 10_000,
         });
 
-        const imageToggle = page.getByRole("button", { name: "이미지" });
-        if ((await imageToggle.getAttribute("aria-expanded")) !== "true") {
-          await imageToggle.click();
-        }
+        await page.getByRole("button", { name: "이미지" }).click();
+        await expect(
+          page.getByRole("dialog", { name: "이미지 관리" }),
+        ).toBeVisible();
         await page
           .getByRole("button", { name: `${fixtureName} 삭제` })
           .click();
-        await page
+        await expect(
+          page.getByRole("dialog", { name: "이미지 관리" }),
+        ).toHaveCount(0);
+        const deleteDialog = page.getByRole("dialog", {
+          name: "이미지 삭제",
+        });
+        await expect(deleteDialog).toHaveCount(1);
+        await expect(deleteDialog).toBeVisible();
+        await deleteDialog
           .getByRole("button", { name: `${fixtureName} 삭제 확인` })
           .click();
         await expect(page.getByText("이미지를 삭제했습니다.")).toBeVisible();
