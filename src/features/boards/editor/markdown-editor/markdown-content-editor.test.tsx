@@ -139,7 +139,7 @@ it("bridges a rich image insertion to the controller and restores editor focus",
   const editor = createFakeController();
   const { insertImage } = renderWithImageInsertion(editor);
 
-  await screen.findByRole("button", { name: "이미지 삽입" });
+  await screen.findByRole("button", { name: "이미지" });
   await act(async () => {
     expect(insertImage()?.(image, "행사 포스터")).toBe(true);
   });
@@ -547,4 +547,65 @@ it("groups formatting controls and renders help as a separate footer", async () 
   expect(help).toHaveClass("markdown-editor-help");
   expect(help.parentElement).toHaveClass("markdown-rich-surface");
   expect(help.previousElementSibling).toHaveClass("markdown-editor-mount");
+});
+
+it.each(["리치 텍스트", "Markdown 원문"])(
+  "opens the image library from an icon toolbar in %s mode and closes it with Escape",
+  async (mode) => {
+    const editor = createFakeController();
+    render(
+      <MarkdownContentEditor
+        createController={editor.factory}
+        id="board-content"
+        imageLibrary={() => <div>라이브러리 패널</div>}
+        maxLength={200_000}
+        onChange={vi.fn()}
+        value="본문"
+      />,
+    );
+
+    if (mode === "Markdown 원문") {
+      fireEvent.click(await screen.findByRole("tab", { name: mode }));
+    }
+    const imageButton = await screen.findByRole("button", { name: "이미지" });
+    expect(imageButton).toHaveAttribute("data-tooltip", "이미지");
+    expect(imageButton).toHaveAttribute("aria-expanded", "false");
+    expect(imageButton.textContent).toBe("");
+    expect(imageButton.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
+    expect(screen.getByText("라이브러리 패널")).not.toBeVisible();
+
+    fireEvent.click(imageButton);
+    expect(imageButton).toHaveAttribute("aria-expanded", "true");
+    expect(screen.getByText("라이브러리 패널")).toBeVisible();
+
+    fireEvent.keyDown(screen.getByLabelText("본문 편집기"), { key: "Escape" });
+    expect(imageButton).toHaveAttribute("aria-expanded", "false");
+    expect(screen.getByText("라이브러리 패널")).not.toBeVisible();
+  },
+);
+
+it("preserves mounted image library state while the panel is closed", async () => {
+  const editor = createFakeController();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      imageLibrary={() => (
+        <input aria-label="라이브러리 로컬 상태" defaultValue="초기" />
+      )}
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="본문"
+    />,
+  );
+
+  const imageButton = await screen.findByRole("button", { name: "이미지" });
+  fireEvent.click(imageButton);
+  fireEvent.change(screen.getByLabelText("라이브러리 로컬 상태"), {
+    target: { value: "변경" },
+  });
+  fireEvent.click(imageButton);
+  fireEvent.click(imageButton);
+
+  expect(screen.getByLabelText("라이브러리 로컬 상태")).toHaveValue("변경");
 });

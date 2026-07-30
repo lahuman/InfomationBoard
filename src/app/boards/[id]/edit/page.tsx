@@ -6,6 +6,11 @@ import { publishBoard } from "@/features/boards/actions/publish-board";
 import { updateBoard } from "@/features/boards/actions/update-board";
 import { BoardEditor } from "@/features/boards/editor/board-editor";
 import { getBoardForEditor } from "@/features/boards/editor/queries";
+import { cancelBoardImage } from "@/features/boards/images/actions/cancel-image";
+import { deleteBoardImage } from "@/features/boards/images/actions/delete-image";
+import { finalizeBoardImage } from "@/features/boards/images/actions/finalize-image";
+import { reserveBoardImage } from "@/features/boards/images/actions/reserve-image";
+import { getBoardImageLibrary } from "@/features/boards/images/queries";
 import { getPublicEnv } from "@/lib/env/public";
 
 export default async function EditBoardPage({
@@ -19,6 +24,12 @@ export default async function EditBoardPage({
   const board = await getBoardForEditor(user.id, id);
 
   if (!board) notFound();
+  const initialImageLibrary = await getBoardImageLibrary(
+    user.id,
+    board.id,
+    board.slug,
+  );
+  if (!initialImageLibrary) notFound();
   const canonicalUrl = new URL(
     `/b/${board.slug}`,
     getPublicEnv().NEXT_PUBLIC_APP_URL,
@@ -49,9 +60,14 @@ export default async function EditBoardPage({
 
       <BoardEditor
         board={board}
+        cancelImageAction={cancelBoardImage}
         canonicalUrl={canonicalUrl}
         deleteBoardAction={deleteBoard}
+        deleteImageAction={deleteBoardImage}
+        finalizeImageAction={finalizeBoardImage}
+        initialImageLibrary={initialImageLibrary}
         publishBoardAction={publishBoard}
+        reserveImageAction={reserveBoardImage}
         updateBoardAction={updateBoard}
       />
     </main>

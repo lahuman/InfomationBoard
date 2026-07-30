@@ -1,10 +1,11 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, expect, it, vi } from "vitest";
 import EditBoardPage from "./page";
 
 const mocks = vi.hoisted(() => ({
   requireUser: vi.fn(),
   getBoardForEditor: vi.fn(),
+  getBoardImageLibrary: vi.fn(),
   notFound: vi.fn(),
 }));
 
@@ -22,6 +23,26 @@ vi.mock("@/features/auth/require-user", () => ({
 
 vi.mock("@/features/boards/editor/queries", () => ({
   getBoardForEditor: mocks.getBoardForEditor,
+}));
+
+vi.mock("@/features/boards/images/queries", () => ({
+  getBoardImageLibrary: mocks.getBoardImageLibrary,
+}));
+
+vi.mock("@/features/boards/images/actions/reserve-image", () => ({
+  reserveBoardImage: vi.fn(),
+}));
+
+vi.mock("@/features/boards/images/actions/finalize-image", () => ({
+  finalizeBoardImage: vi.fn(),
+}));
+
+vi.mock("@/features/boards/images/actions/cancel-image", () => ({
+  cancelBoardImage: vi.fn(),
+}));
+
+vi.mock("@/features/boards/images/actions/delete-image", () => ({
+  deleteBoardImage: vi.fn(),
 }));
 
 vi.mock("@/features/boards/actions/update-board", () => ({
@@ -44,7 +65,10 @@ vi.mock("@/lib/env/public", () => ({
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mocks.requireUser.mockResolvedValue({ id: "owner-id", email: null });
+  mocks.requireUser.mockResolvedValue({
+    id: "10000000-0000-4000-8000-000000000001",
+    email: null,
+  });
   mocks.getBoardForEditor.mockResolvedValue({
     id: "30000000-0000-4000-8000-000000000003",
     slug: "summer-night-market",
@@ -66,6 +90,10 @@ beforeEach(() => {
   });
   mocks.notFound.mockImplementation(() => {
     throw new Error("NEXT_NOT_FOUND");
+  });
+  mocks.getBoardImageLibrary.mockResolvedValue({
+    images: [],
+    storageBytes: 0,
   });
 });
 
@@ -89,10 +117,29 @@ it("protects and renders the owner editor", async () => {
       name: "https://boards.example/b/summer-night-market",
     }),
   ).toBeVisible();
+  expect(mocks.getBoardImageLibrary).toHaveBeenCalledWith(
+    "10000000-0000-4000-8000-000000000001",
+    "30000000-0000-4000-8000-000000000003",
+    "summer-night-market",
+  );
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+  expect(screen.getByText("0 B / 50 MB")).toBeVisible();
 });
 
 it("uses the same not-found response for missing or foreign boards", async () => {
   mocks.getBoardForEditor.mockResolvedValue(null);
+
+  await expect(
+    EditBoardPage({
+      params: Promise.resolve({
+        id: "30000000-0000-4000-8000-000000000003",
+      }),
+    }),
+  ).rejects.toThrow("NEXT_NOT_FOUND");
+});
+
+it("uses not-found when the owner image library cannot be loaded", async () => {
+  mocks.getBoardImageLibrary.mockResolvedValue(null);
 
   await expect(
     EditBoardPage({

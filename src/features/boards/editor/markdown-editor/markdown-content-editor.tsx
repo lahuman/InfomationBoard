@@ -4,6 +4,7 @@ import {
   Bold,
   Heading2,
   Heading3,
+  Image as ImageIcon,
   Italic,
   Link,
   List,
@@ -136,6 +137,7 @@ export function MarkdownContentEditor({
   const [error, setError] = useState("");
   const [linkFormVisible, setLinkFormVisible] = useState(false);
   const [linkUrl, setLinkUrl] = useState("");
+  const [imagePanelVisible, setImagePanelVisible] = useState(false);
 
   onChangeRef.current = onChange;
   maxLengthRef.current = maxLength;
@@ -326,9 +328,19 @@ export function MarkdownContentEditor({
   const richPanelId = `${id}-rich-panel`;
   const sourcePanelId = `${id}-source-panel`;
   const richEditorHelpId = `${id}-rich-help`;
+  const imagePanelId = `${id}-image-library-panel`;
+  const imageLibraryPanel = imageLibrary?.(insertImage);
 
   return (
-    <section className="markdown-content-editor" aria-label="본문 편집기">
+    <section
+      className="markdown-content-editor"
+      aria-label="본문 편집기"
+      onKeyDown={(event) => {
+        if (event.key === "Escape" && imagePanelVisible) {
+          setImagePanelVisible(false);
+        }
+      }}
+    >
       <div className="markdown-editor-header">
         <div className="markdown-mode-tabs" role="tablist" aria-label="편집 모드">
           <button
@@ -353,32 +365,50 @@ export function MarkdownContentEditor({
           </button>
         </div>
 
-        {mode === "rich" ? (
+        {mode === "rich" || imageLibrary ? (
           <div className="markdown-toolbar" aria-label="서식 도구">
-            {toolbarGroups.map(([groupName, items]) => (
-              <div className="markdown-toolbar-group" key={groupName}>
-                {items.map(([command, label, Icon]) => {
-                  const state = toolbarState[command];
-                  return (
-                    <button
-                      aria-label={label}
-                      aria-pressed={
-                        selectionSensitiveToolbarCommands.has(command)
-                          ? state.active
-                          : undefined
-                      }
-                      data-tooltip={label}
-                      disabled={!state.enabled}
-                      key={command}
-                      onClick={() => runToolbarCommand(command)}
-                      type="button"
-                    >
-                      <Icon aria-hidden="true" size={18} strokeWidth={2} />
-                    </button>
-                  );
-                })}
+            {mode === "rich"
+              ? toolbarGroups.map(([groupName, items]) => (
+                  <div className="markdown-toolbar-group" key={groupName}>
+                    {items.map(([command, label, Icon]) => {
+                      const state = toolbarState[command];
+                      return (
+                        <button
+                          aria-label={label}
+                          aria-pressed={
+                            selectionSensitiveToolbarCommands.has(command)
+                              ? state.active
+                              : undefined
+                          }
+                          data-tooltip={label}
+                          disabled={!state.enabled}
+                          key={command}
+                          onClick={() => runToolbarCommand(command)}
+                          type="button"
+                        >
+                          <Icon aria-hidden="true" size={18} strokeWidth={2} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                ))
+              : null}
+            {imageLibrary ? (
+              <div className="markdown-toolbar-group markdown-image-toolbar-group">
+                <button
+                  aria-controls={imagePanelId}
+                  aria-expanded={imagePanelVisible}
+                  aria-label="이미지"
+                  data-tooltip="이미지"
+                  onClick={() =>
+                    setImagePanelVisible((visible) => !visible)
+                  }
+                  type="button"
+                >
+                  <ImageIcon aria-hidden="true" size={18} strokeWidth={2} />
+                </button>
               </div>
-            ))}
+            ) : null}
           </div>
         ) : null}
       </div>
@@ -442,7 +472,15 @@ export function MarkdownContentEditor({
         />
         <p>{value.length.toLocaleString("ko-KR")} / {maxLength.toLocaleString("ko-KR")}자</p>
       </div>
-      {imageLibrary?.(insertImage)}
+      {imageLibrary ? (
+        <div
+          className="markdown-image-panel"
+          hidden={!imagePanelVisible}
+          id={imagePanelId}
+        >
+          {imageLibraryPanel}
+        </div>
+      ) : null}
     </section>
   );
 }

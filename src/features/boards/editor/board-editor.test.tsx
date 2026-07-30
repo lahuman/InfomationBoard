@@ -5,10 +5,18 @@ import type { DeleteBoardResult } from "../actions/delete-board";
 import type { PublishBoardResult } from "../actions/publish-board";
 import type { UpdateBoardResult } from "../actions/update-board";
 import type { UpdateBoardInput } from "../schema";
+import type { BoardImageLibrary } from "../images/model";
 
 const routerMocks = vi.hoisted(() => ({
   replace: vi.fn(),
   refresh: vi.fn(),
+}));
+
+const imageLibraryMocks = vi.hoisted(() => ({
+  component: vi.fn((props: unknown) => {
+    void props;
+    return null;
+  }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -17,6 +25,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("./markdown-editor/milkdown-editor", () => ({
   createMilkdownEditorController: vi.fn(() => new Promise(() => {})),
+}));
+
+vi.mock("../images/image-library", () => ({
+  ImageLibrary: imageLibraryMocks.component,
 }));
 
 const initialBoard = {
@@ -42,6 +54,11 @@ const initialBoard = {
 const publicationProps = {
   canonicalUrl: "https://boards.example/b/summer-night-market",
   publishBoardAction: vi.fn(),
+};
+
+const initialImageLibrary: BoardImageLibrary = {
+  images: [],
+  storageBytes: 0,
 };
 
 beforeEach(() => {
@@ -434,4 +451,60 @@ it("keeps the confirmation open when deletion fails", async () => {
   );
   expect(screen.getByRole("dialog")).toBeVisible();
   expect(routerMocks.replace).not.toHaveBeenCalled();
+});
+
+it("wires the current draft, image lifecycle actions, and deletion revision into autosave", async () => {
+  const update = vi.fn(async (): Promise<UpdateBoardResult> => ({
+    status: "saved",
+    revision: 9,
+    updatedAt: "2026-07-28T10:02:00.000Z",
+  }));
+  const actions = {
+    reserveImageAction: vi.fn(),
+    finalizeImageAction: vi.fn(),
+    cancelImageAction: vi.fn(),
+    deleteImageAction: vi.fn(),
+  };
+  render(
+    <BoardEditor
+      {...publicationProps}
+      {...actions}
+      board={initialBoard}
+      deleteBoardAction={vi.fn()}
+      initialImageLibrary={initialImageLibrary}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+  fireEvent.change(screen.getByLabelText("본문 Markdown 원문"), {
+    target: { value: "# 저장 전 이미지 초안" },
+  });
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+
+  expect(imageLibraryMocks.component).toHaveBeenLastCalledWith(
+    expect.objectContaining({
+      boardId: initialBoard.id,
+      boardSlug: initialBoard.slug,
+      contentMarkdown: "# 저장 전 이미지 초안",
+      initialLibrary: initialImageLibrary,
+      ...actions,
+    }),
+    undefined,
+  );
+
+  const imageLibraryProps = imageLibraryMocks.component.mock.lastCall?.[0] as {
+    onBoardRevision(revision: number): void;
+  };
+  act(() => imageLibraryProps.onBoardRevision(8));
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "삭제 뒤 수정" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+
+  expect(update).toHaveBeenLastCalledWith(
+    expect.objectContaining({ revision: 8, title: "삭제 뒤 수정" }),
+  );
 });

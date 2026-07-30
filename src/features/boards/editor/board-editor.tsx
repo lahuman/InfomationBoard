@@ -9,6 +9,12 @@ import type {
 import { BoardMarkdown } from "../markdown/board-markdown";
 import type { PublicationInput, UpdateBoardInput } from "../schema";
 import type { UpdateBoardResult } from "../actions/update-board";
+import type { CancelBoardImageResult } from "../images/actions/cancel-image";
+import type { DeleteBoardImageResult } from "../images/actions/delete-image";
+import type { FinalizeBoardImageResult } from "../images/actions/finalize-image";
+import type { ReserveBoardImageResult } from "../images/actions/reserve-image";
+import { ImageLibrary } from "../images/image-library";
+import type { BoardImageLibrary } from "../images/model";
 import { PublicationSettings } from "../publication/publication-settings";
 import type { EditorBoard, EditorDraft } from "./editor-board";
 import { MarkdownContentEditor } from "./markdown-editor/markdown-content-editor";
@@ -38,6 +44,28 @@ const saveLabels: Record<SaveState, string> = {
   conflict: "저장 충돌",
 };
 
+type BoardEditorImageProps = {
+  initialImageLibrary: BoardImageLibrary;
+  reserveImageAction: (input: {
+    boardId: string;
+    originalFilename: string;
+    mimeType: string;
+    sizeBytes: number;
+  }) => Promise<ReserveBoardImageResult>;
+  finalizeImageAction: (input: {
+    boardId: string;
+    attachmentId: string;
+  }) => Promise<FinalizeBoardImageResult>;
+  cancelImageAction: (input: {
+    boardId: string;
+    attachmentId: string;
+  }) => Promise<CancelBoardImageResult>;
+  deleteImageAction: (input: {
+    boardId: string;
+    attachmentId: string;
+  }) => Promise<DeleteBoardImageResult>;
+};
+
 type BoardEditorProps = {
   board: EditorBoard;
   canonicalUrl: string;
@@ -48,7 +76,17 @@ type BoardEditorProps = {
   updateBoardAction: (
     input: UpdateBoardInput,
   ) => Promise<UpdateBoardResult>;
-};
+} &
+  (
+    | BoardEditorImageProps
+    | {
+        initialImageLibrary?: never;
+        reserveImageAction?: never;
+        finalizeImageAction?: never;
+        cancelImageAction?: never;
+        deleteImageAction?: never;
+      }
+  );
 
 function toDraft(board: EditorBoard): EditorDraft {
   return {
@@ -65,6 +103,11 @@ export function BoardEditor({
   deleteBoardAction,
   publishBoardAction,
   updateBoardAction,
+  initialImageLibrary,
+  reserveImageAction,
+  finalizeImageAction,
+  cancelImageAction,
+  deleteImageAction,
 }: BoardEditorProps) {
   const router = useRouter();
   const [draft, setDraft] = useState<EditorDraft>(() => toDraft(board));
@@ -353,6 +396,27 @@ export function BoardEditor({
           <label id="board-content-label">본문</label>
           <MarkdownContentEditor
             id="board-content"
+            imageLibrary={
+              initialImageLibrary
+                ? (insertImage) => (
+                    <ImageLibrary
+                      boardId={board.id}
+                      boardSlug={board.slug}
+                      cancelImageAction={cancelImageAction}
+                      contentMarkdown={draft.contentMarkdown}
+                      deleteImageAction={deleteImageAction}
+                      finalizeImageAction={finalizeImageAction}
+                      initialLibrary={initialImageLibrary}
+                      onBoardRevision={(nextRevision) => {
+                        revisionRef.current = nextRevision;
+                        setRevision(nextRevision);
+                      }}
+                      onInsert={insertImage}
+                      reserveImageAction={reserveImageAction}
+                    />
+                  )
+                : undefined
+            }
             maxLength={200_000}
             onChange={(contentMarkdown) => updateDraft({ contentMarkdown })}
             value={draft.contentMarkdown}
