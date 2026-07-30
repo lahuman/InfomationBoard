@@ -109,12 +109,6 @@ function createFakeController(
         return true;
       });
     },
-    makeNextRunMutateWithoutEmitting: (next: string) => {
-      run.mockImplementationOnce(() => {
-        markdown = next;
-        return true;
-      });
-    },
     makeNextGetMarkdownThrow: () => {
       throwOnNextGetMarkdown = true;
     },
@@ -411,7 +405,7 @@ it("rolls back a rich image when reading the post-mutation Markdown fails", asyn
 
   await waitFor(() => expect(editor.getMarkdown).toHaveBeenCalled());
   fireEvent.click(screen.getByRole("button", { name: "이미지" }));
-  editor.makeNextRunMutateWithoutEmitting(
+  editor.makeNextRunProduce(
     `본문\n![행사 포스터](${image.url} "width=50")`,
   );
   editor.makeNextGetMarkdownThrow();
@@ -427,6 +421,10 @@ it("rolls back a rich image when reading the post-mutation Markdown fails", asyn
   expect(bridge()?.open).toBe(true);
   fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
   expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue("본문");
+  fireEvent.click(screen.getByRole("tab", { name: "리치 텍스트" }));
+  editor.emitMarkdown("후속 일반 입력");
+  expect(onChange).toHaveBeenCalledTimes(1);
+  expect(onChange).toHaveBeenCalledWith("후속 일반 입력");
 });
 
 it("falls back to source mode when post-mutation serialization and rollback both fail", async () => {
@@ -439,7 +437,7 @@ it("falls back to source mode when post-mutation serialization and rollback both
 
   await waitFor(() => expect(editor.getMarkdown).toHaveBeenCalled());
   fireEvent.click(screen.getByRole("button", { name: "이미지" }));
-  editor.makeNextRunMutateWithoutEmitting(
+  editor.makeNextRunProduce(
     `본문\n![행사 포스터](${image.url} "width=50")`,
   );
   editor.makeNextGetMarkdownThrow();

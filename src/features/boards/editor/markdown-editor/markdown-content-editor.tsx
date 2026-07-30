@@ -130,6 +130,7 @@ export function MarkdownContentEditor({
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
   const maxLengthRef = useRef(maxLength);
+  const richImageMutationInProgressRef = useRef(false);
   const [mode, setMode] = useState<EditorMode>("rich");
   const [sourceValue, setSourceValue] = useState(value);
   const [toolbarState, setToolbarState] = useState(defaultToolbarState);
@@ -173,6 +174,7 @@ export function MarkdownContentEditor({
       ariaLabelledBy: `${id}-label`,
       ariaDescribedBy: `${id}-rich-help`,
       onMarkdownChange: (nextMarkdown) => {
+        if (richImageMutationInProgressRef.current) return;
         if (nextMarkdown === latestValueRef.current) return;
         if (nextMarkdown.length <= maxLengthRef.current) {
           latestValueRef.current = nextMarkdown;
@@ -336,55 +338,58 @@ export function MarkdownContentEditor({
       if (!controller) return false;
 
       const previousMarkdown = latestValueRef.current;
-      const didInsert = controller.run("image", {
-        src: image.url,
-        alt,
-        width,
-        replaceSelectedImage: selectedImage?.src === image.url,
-      });
-      if (!didInsert) return false;
-
-      let nextMarkdown: string;
+      richImageMutationInProgressRef.current = true;
       try {
-        nextMarkdown = controller.getMarkdown();
-      } catch {
+        const didInsert = controller.run("image", {
+          src: image.url,
+          alt,
+          width,
+          replaceSelectedImage: selectedImage?.src === image.url,
+        });
+        if (!didInsert) return false;
+
+        let nextMarkdown: string;
         try {
-          controller.replaceMarkdown(previousMarkdown);
+          nextMarkdown = controller.getMarkdown();
         } catch {
-          setMode("source");
-          setError(conversionError);
+          latestValueRef.current = previousMarkdown;
+          setSourceValue(previousMarkdown);
+          try {
+            controller.replaceMarkdown(previousMarkdown);
+          } catch {
+            setMode("source");
+            setError(conversionError);
+            return false;
+          }
           return false;
         }
-        latestValueRef.current = previousMarkdown;
-        setSourceValue(previousMarkdown);
-        return false;
-      }
-      if (nextMarkdown === previousMarkdown) return false;
+        if (nextMarkdown === previousMarkdown) return false;
 
-      if (nextMarkdown.length > maxLengthRef.current) {
-        try {
-          controller.replaceMarkdown(previousMarkdown);
-        } catch {
-          setMode("source");
-          setError(conversionError);
+        if (nextMarkdown.length > maxLengthRef.current) {
+          latestValueRef.current = previousMarkdown;
+          setSourceValue(previousMarkdown);
+          try {
+            controller.replaceMarkdown(previousMarkdown);
+          } catch {
+            setMode("source");
+            setError(conversionError);
+            return false;
+          }
+          setError(characterLimitError(maxLengthRef.current));
           return false;
         }
-        latestValueRef.current = previousMarkdown;
-        setSourceValue(previousMarkdown);
-        setError(characterLimitError(maxLengthRef.current));
-        return false;
-      }
 
-      if (latestValueRef.current !== nextMarkdown) {
         latestValueRef.current = nextMarkdown;
         setSourceValue(nextMarkdown);
         onChangeRef.current(nextMarkdown);
+        setError("");
+        setImageModalOpen(false);
+        setSelectedImage(null);
+        controller.focus();
+        return true;
+      } finally {
+        richImageMutationInProgressRef.current = false;
       }
-      setError("");
-      setImageModalOpen(false);
-      setSelectedImage(null);
-      controller.focus();
-      return true;
     }
 
     const source = sourceRef.current;
