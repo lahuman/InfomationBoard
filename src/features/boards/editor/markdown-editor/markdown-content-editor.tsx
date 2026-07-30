@@ -348,6 +348,15 @@ export function MarkdownContentEditor({
       try {
         nextMarkdown = controller.getMarkdown();
       } catch {
+        try {
+          controller.replaceMarkdown(previousMarkdown);
+        } catch {
+          setMode("source");
+          setError(conversionError);
+          return false;
+        }
+        latestValueRef.current = previousMarkdown;
+        setSourceValue(previousMarkdown);
         return false;
       }
       if (nextMarkdown === previousMarkdown) return false;

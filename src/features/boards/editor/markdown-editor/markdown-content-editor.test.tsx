@@ -59,6 +59,7 @@ function createFakeController(
 ) {
   let markdown = "";
   let selectedImage = initialSelectedImage;
+  let throwOnNextGetMarkdown = false;
   let onMarkdownChange: (next: string) => void = () => undefined;
   const run = vi.fn((command, payload) => {
     if (command === "image" && payload?.src) {
@@ -71,11 +72,18 @@ function createFakeController(
   const replaceMarkdown = vi.fn((next: string) => {
     markdown = next;
   });
+  const getMarkdown = vi.fn(() => {
+    if (throwOnNextGetMarkdown) {
+      throwOnNextGetMarkdown = false;
+      throw new Error("serialize failed");
+    }
+    return markdown;
+  });
   const factory: CreateMarkdownEditorController = vi.fn(async (options) => {
     markdown = options.markdown;
     onMarkdownChange = options.onMarkdownChange;
     return {
-      getMarkdown: () => markdown,
+      getMarkdown,
       getSelectedImage: () => selectedImage,
       replaceMarkdown,
       run,
@@ -86,6 +94,7 @@ function createFakeController(
   });
   return {
     factory,
+    getMarkdown,
     run,
     focus,
     replaceMarkdown,
@@ -99,6 +108,15 @@ function createFakeController(
         onMarkdownChange(markdown);
         return true;
       });
+    },
+    makeNextRunMutateWithoutEmitting: (next: string) => {
+      run.mockImplementationOnce(() => {
+        markdown = next;
+        return true;
+      });
+    },
+    makeNextGetMarkdownThrow: () => {
+      throwOnNextGetMarkdown = true;
     },
   };
 }
@@ -381,6 +399,70 @@ it("keeps the image bridge open when a rich mutation is unchanged", async () => 
 
   expect(bridge()?.open).toBe(true);
   expect(onChange).not.toHaveBeenCalled();
+});
+
+it("rolls back a rich image when reading the post-mutation Markdown fails", async () => {
+  const editor = createFakeController();
+  const onChange = vi.fn();
+  const { bridge } = renderWithImageInsertion(editor, {
+    onChange,
+    value: "본문",
+  });
+
+  await waitFor(() => expect(editor.getMarkdown).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+  editor.makeNextRunMutateWithoutEmitting(
+    `본문\n![행사 포스터](${image.url} "width=50")`,
+  );
+  editor.makeNextGetMarkdownThrow();
+
+  await act(async () => {
+    expect(
+      bridge()?.applyImage({ image, alt: "행사 포스터", width: 50 }),
+    ).toBe(false);
+  });
+
+  expect(editor.replaceMarkdown).toHaveBeenCalledWith("본문");
+  expect(onChange).not.toHaveBeenCalled();
+  expect(bridge()?.open).toBe(true);
+  fireEvent.click(screen.getByRole("tab", { name: "Markdown 원문" }));
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue("본문");
+});
+
+it("falls back to source mode when post-mutation serialization and rollback both fail", async () => {
+  const editor = createFakeController();
+  const onChange = vi.fn();
+  const { bridge } = renderWithImageInsertion(editor, {
+    onChange,
+    value: "본문",
+  });
+
+  await waitFor(() => expect(editor.getMarkdown).toHaveBeenCalled());
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+  editor.makeNextRunMutateWithoutEmitting(
+    `본문\n![행사 포스터](${image.url} "width=50")`,
+  );
+  editor.makeNextGetMarkdownThrow();
+  editor.replaceMarkdown.mockImplementationOnce(() => {
+    throw new Error("rollback failed");
+  });
+
+  await act(async () => {
+    expect(
+      bridge()?.applyImage({ image, alt: "행사 포스터", width: 50 }),
+    ).toBe(false);
+  });
+
+  expect(screen.getByRole("tab", { name: "Markdown 원문" })).toHaveAttribute(
+    "aria-selected",
+    "true",
+  );
+  expect(screen.getByRole("alert")).toHaveTextContent(
+    "Markdown을 리치 텍스트로 변환하지 못했습니다.",
+  );
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue("본문");
+  expect(onChange).not.toHaveBeenCalled();
+  expect(bridge()?.open).toBe(true);
 });
 
 it("keeps source Markdown and the bridge open for an unsafe image URL", async () => {
