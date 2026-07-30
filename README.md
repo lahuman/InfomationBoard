@@ -79,6 +79,38 @@ RPC boundary. `20260730000100_safe_image_board_deletion.sql` adds the claimed
 image and board deletion boundary. Deploying application code before these
 migrations are applied leaves the image workflow unavailable.
 
+The image migration is deliberately non-destructive. Before applying
+`20260729000100_board_images.sql` to a database that already has attachment
+rows, inventory unsupported MIME metadata and accounts above the new 50 MiB
+limit:
+
+```sql
+select id, owner_id, storage_path, mime_type
+from public.attachments
+where mime_type not in ('image/jpeg', 'image/png', 'image/webp', 'image/gif');
+
+with attachment_usage as (
+  select owner_id, sum(size_bytes)::bigint as attachment_bytes
+  from public.attachments
+  group by owner_id
+)
+select
+  profiles.id,
+  profiles.storage_bytes as recorded_bytes,
+  coalesce(attachment_usage.attachment_bytes, 0) as attachment_bytes
+from public.profiles
+left join attachment_usage on attachment_usage.owner_id = profiles.id
+where profiles.storage_bytes > 52428800
+   or coalesce(attachment_usage.attachment_bytes, 0) > 52428800;
+```
+
+Resolve every returned row and its corresponding private Storage object before
+retrying the migration. The migration aborts with
+`board_image_migration_unsupported_attachments` or
+`board_image_migration_account_over_quota`, including an actionable detail and
+hint; it never silently deletes legacy metadata. A successful run canonicalizes
+display filenames and backfills `profiles.storage_bytes`.
+
 ## Hosted authentication configuration
 
 In Supabase Dashboard, configure:
@@ -149,6 +181,9 @@ rows, and all boards for one account share a 50 MiB allowance.
 `profiles.storage_bytes` includes a reservation immediately and continues to
 include `reserved`, transiently `cancelling`, `ready`, and transiently
 `deleting` rows until trusted metadata deletion releases the quota.
+Display filenames are stripped to a basename, have control characters removed,
+are normalized to Unicode NFC, and are limited to 180 code points by both the
+action and a database constraint. Filenames never determine Storage paths.
 
 Image bytes stay in the private `board-images` bucket. Markdown stores stable
 `/b/[slug]/images/[attachment-id]` URLs, so image delivery inherits the parent
@@ -156,10 +191,19 @@ board's access mode: public images are anonymous, password-board images require
 the scoped access cookie, and private/draft images are available only to their
 owner.
 
+Finalization and ready-image deletion claims are service-role-only RPCs. Their
+server actions first authenticate the owner, load the exact owned board and
+attachment, verify bytes or saved Markdown as appropriate, and then pass the
+explicit owner, board, and attachment IDs through the server-only client.
+Storage INSERT and image-cancellation claims both lock the board before reading
+or locking the attachment, so either ordering serializes without a deadlock.
+
 Run the focused local database and live browser checks with:
 
 ```bash
 npx supabase test db supabase/tests/phase2_rls.test.sql supabase/tests/phase5_board_images.test.sql
+npx supabase test db supabase/tests/phase5_board_deletion_concurrency.test.sql
+npx supabase test db supabase/tests/phase5_image_cancellation_concurrency.test.sql
 E2E_LIVE_SUPABASE=1 \
   npm run test:e2e -- tests/e2e/board-images.spec.ts
 ```
@@ -223,6 +267,8 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
 - `npx supabase db lint --linked --level error --fail-on error`
 - `npx supabase test db --linked supabase/tests/phase2_rls.test.sql`
 - `npx supabase test db supabase/tests/phase2_rls.test.sql supabase/tests/phase4_publishing.test.sql supabase/tests/phase4_password_access.test.sql supabase/tests/phase5_board_images.test.sql`
+- `npx supabase test db supabase/tests/phase5_board_deletion_concurrency.test.sql`
+- `npx supabase test db supabase/tests/phase5_image_cancellation_concurrency.test.sql`
 
 On the Docker-free workstation, run all transactional database suites twice:
 
@@ -237,5 +283,11 @@ npx supabase db query --linked --file supabase/tests/phase4_password_access.test
 
 Expected final assertions are 15, 20, and 18 respectively. The repeated runs
 prove every fixture transaction rolls back cleanly.
+
+The local main database command additionally expects 122 Phase 5 assertions
+(175 assertions across its four files). The board-deletion and
+image-cancellation concurrency suites run separately and expect 18 and 17
+assertions respectively because they coordinate multiple live database
+sessions.
 
 The archived 2019 prototype lives under `legacy/` and must not be deployed.

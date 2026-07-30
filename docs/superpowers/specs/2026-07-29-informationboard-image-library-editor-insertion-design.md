@@ -76,7 +76,8 @@ The existing attachment columns remain sufficient:
 - `storage_path` is a random server-generated path and never includes an
   untrusted filename;
 - `original_filename`, `mime_type`, and `size_bytes` hold verified display
-  metadata;
+  metadata. Display filenames are reduced to a basename, stripped of control
+  characters, normalized to Unicode NFC, and limited to 180 code points;
 - `state` is `reserved` during upload, `cancelling` while failed-upload cleanup
   owns the object-removal claim, `ready` after verification, and `deleting`
   while ready-image cleanup owns the claim;
@@ -86,6 +87,14 @@ A forward-only migration tightens the table to the accepted image MIME types,
 keeps the 10 MiB stored-byte constraint, and adds the functions and triggers
 needed for atomic quota accounting. There is no client-written `storage_bytes`
 value.
+
+The migration begins with a non-destructive compatibility preflight. It aborts
+with an actionable stable error if any legacy attachment uses an unsupported
+MIME type or if either recorded or attachment-backed usage for an account is
+above 50 MiB. Unsupported rows and their Storage objects must be inventoried
+and explicitly migrated or removed by an operator; the migration never silently
+deletes them. Only after the preflight succeeds does it canonicalize existing
+display filenames and authoritatively backfill account usage.
 
 ### Atomic quota accounting
 
@@ -122,6 +131,13 @@ path. There are no client Storage SELECT, UPDATE, UPSERT, DELETE, list, move, or
 overwrite policies. Server actions use the existing server-only administrative
 client for verification and cleanup.
 
+The Storage INSERT predicate parses the exact owner/board/attachment path, then
+takes a `FOR KEY SHARE` lock on the owned, unclaimed board before it checks the
+reservation. Cancellation takes `FOR UPDATE` on that same board before it locks
+the attachment. The shared board-first order makes upload and cancellation
+serialize in either ordering without a board/attachment deadlock; a cancellation
+that commits first makes the later INSERT fail its real RLS predicate.
+
 ## 5. Upload Flow
 
 1. The owner chooses one image in the board image panel.
@@ -135,10 +151,12 @@ client for verification and cleanup.
 6. The authenticated browser uploads with `upsert: false`; Storage RLS admits
    only the live reservation path and reports progress or a clear uploading
    state.
-7. The finalize action downloads the stored object with the server-only client
-   and decodes it with `sharp` to prove it is a JPEG, PNG, WebP, or GIF. It also
-   verifies actual byte size and rejects a zero-byte, oversized, mismatched, or
-   malformed file.
+7. The finalize action authenticates and loads the exact owned reservation,
+   downloads the stored object with the server-only client, and decodes it with
+   `sharp` to prove it is a JPEG, PNG, WebP, or GIF. It also verifies actual byte
+   size and rejects a zero-byte, oversized, mismatched, or malformed file. Only
+   then does it call the service-role-only finalization RPC with explicit owner,
+   board, and attachment IDs plus the server-verified MIME and byte count.
 8. If actual size differs from the reservation, finalization adjusts quota
    atomically only when the final total still fits 50 MB.
 9. The attachment becomes `ready`, its expiry is cleared, and the refreshed
@@ -200,6 +218,11 @@ shows its character-limit message. Undo and redo treat insertion as a normal
 editor transaction. Markdown source mode can insert the equivalent syntax at
 the textarea selection and remains round-trip compatible with rich mode.
 
+Rich insertion validates the controller's Markdown synchronously immediately
+after the transaction, rather than relying on a later listener callback. If the
+transaction would cross the limit, it restores the previous Markdown before
+returning failure, so no oversized transient value can enter autosave state.
+
 The existing Markdown renderer continues to disallow raw HTML. Its image URL
 policy is extended only for the stable local attachment route and already-safe
 HTTP(S) images; unsafe protocols remain rejected.
@@ -241,14 +264,16 @@ request. This closes the autosave window in which a newly inserted local image
 reference is not yet present in the saved board. The server check remains
 authoritative for references saved from any other tab.
 
-For an unused image, an authenticated RPC atomically claims
-`ready -> deleting` and returns the exact owned path. The action removes that
-object, then uses the admin client for a service-role-only completion that
-deletes metadata and releases quota. Retrying a `deleting` row resumes the same
-path. Exact object-missing is idempotent; any other removal failure preserves
-the row and charged quota. Image library and delivery queries continue to
-resolve only `ready` rows. Library cleanup separately resumes persisted
-`deleting` rows, including after reload, without exposing them in the list.
+For an unused image, the authenticated action resolves the exact owned board and
+attachment and checks saved Markdown, then a service-role-only RPC atomically
+claims `ready -> deleting` with explicit owner, board, attachment, and revision
+arguments. The action removes the returned exact path and uses a second
+service-role-only RPC to delete metadata and release quota. Retrying a
+`deleting` row resumes the same path. Exact object-missing is idempotent; any
+other removal failure preserves the row and charged quota. Image library and
+delivery queries continue to resolve only `ready` rows. Library cleanup
+separately resumes persisted `deleting` rows, including after reload, without
+exposing them in the list.
 
 The image claim locks the board, compares a required non-null saved revision,
 and bumps/returns the revision with every post-claim action result. A save that
@@ -261,6 +286,11 @@ current revision, while an absent attachment returns `deleted` with that
 revision. Once trusted completion succeeds, later usage refresh failure cannot
 reverse the result; `deleted` may omit `storageBytes` so the UI removes the row
 and refreshes or recomputes usage separately.
+
+Every asynchronous revision producer in the editor—autosave, image deletion,
+and publication settings—passes through one monotonic fence:
+`max(current_revision, returned_revision)`. A delayed older response therefore
+cannot lower either the ref used by later mutations or the visible revision.
 
 Board deletion first claims the owned board with `deletion_started_at`, making
 it private and non-published, then enumerates every server-resolved attachment
@@ -285,11 +315,15 @@ cannot be followed by republishing.
 - All server actions begin with authenticated user resolution and board-owner
   checks; client-provided owner IDs and storage paths are ignored.
 - Filenames are normalized for display, stripped of path components and control
-  characters, and length-limited. They never determine an object path.
+  characters, normalized to NFC, and limited to 180 code points at the
+  database boundary. They never determine an object path.
 - MIME headers and extensions are hints only. Successful image decoding is the
   final format check.
 - Reservation and lifecycle RPCs use a fixed empty `search_path`, explicit
   schema qualification, minimal grants, and server-controlled values.
+  Finalization and ready-image deletion claims are executable only by
+  `service_role`; their actions authenticate and verify the exact owned rows
+  before passing explicit identity arguments through the admin client.
 - Upload and delete errors use Korean user-facing messages without object paths,
   SQL details, keys, or stack traces.
 - Network interruption leaves a cancelable or expiring reservation, never an
@@ -304,10 +338,10 @@ cannot be followed by republishing.
   is executable only by `service_role`, and is called through the server-only
   admin client. Authenticated and anonymous clients cannot release a claimed
   row or its quota directly.
-- Ready deletion mirrors that boundary with `deleting`: authenticated callers
-  can claim only an exact owned ready/deleting row, while only `service_role`
-  can complete after server-verified object removal. The former authenticated
-  direct metadata deletion RPC does not exist.
+- Ready deletion mirrors that boundary with `deleting`: only `service_role`
+  can claim an exact owner/board/attachment/revision tuple or complete after
+  server-verified object removal. The former authenticated direct metadata
+  deletion RPC does not exist.
 - Board deletion completion is likewise service-role-only. Its persisted claim,
   reservation lock, and Storage INSERT lock close the path-enumeration race and
   prevent direct cascade deletion from bypassing object cleanup.
@@ -322,11 +356,19 @@ Implementation is test-driven.
 - a reservation within 50 MB succeeds and increments usage;
 - a reservation above 50 MB fails without inserting or changing usage;
 - concurrent-style sequential reservations cannot exceed the locked quota;
+- migration preflight aborts without deleting unsupported or over-quota legacy
+  rows, while supported in-quota rows are preserved and backfilled;
+- direct authenticated filename inputs are canonicalized and the table rejects
+  noncanonical trusted writes;
 - the 10 MiB stored-byte, accepted MIME, 20-per-board, ownership, state, and
   expiry rules are enforced server-side;
 - cancellation, deletion, board cascade, and expired cleanup release exactly
   the correct bytes;
-- authenticated users cannot edit `storage_bytes` or another owner's rows.
+- authenticated users cannot call trusted finalization or ready-deletion claims,
+  edit `storage_bytes`, or mutate another owner's rows;
+- two-session tests exercise both actual Storage INSERT/cancellation orderings
+  and prove board-tuple serialization, no deadlock, and RLS rejection after a
+  committed cancellation.
 
 ### Server tests
 
@@ -349,7 +391,10 @@ Implementation is test-driven.
   are accessible;
 - the panel lists only the current board's images;
 - rich and source modes insert at their current selections with editable alt
-  text and obey the Markdown length limit;
+  text and obey the Markdown length limit, including a faithful rich-controller
+  transaction at the exact 200,000-character boundary;
+- delayed autosave and publication responses cannot lower the revision learned
+  from image deletion;
 - inserted Markdown survives autosave, recovery, preview, and rich/source
   round trips;
 - an in-use delete result leaves the image visible with actionable guidance.
