@@ -19,8 +19,8 @@ remain in force.
 
 - Images are owned by a board. An image uploaded to one board is not offered in
   another board's image picker.
-- Quota is owned by the account. Reserved and completed images across all of an
-  owner's boards count toward the same 50 MB total.
+- Quota is owned by the account. Reserved, transiently cancelling, and ready
+  images across all of an owner's boards count toward the same 50 MB total.
 - Accepted formats are JPEG, PNG, WebP, and GIF. SVG is excluded because it can
   contain active content.
 - The browser rejects obviously invalid selections early, but database and

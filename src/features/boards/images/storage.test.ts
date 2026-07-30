@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { Blob as NodeBlob } from "node:buffer";
+import sharp from "sharp";
 import {
   InvalidStoredImageError,
   StoredImageUnavailableError,
@@ -16,6 +18,29 @@ const pngBytes = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
   "base64",
 );
+
+async function encodedFixture(
+  format: "jpeg" | "png" | "webp" | "gif",
+): Promise<Buffer> {
+  const image = sharp({
+    create: {
+      width: 2,
+      height: 2,
+      channels: 4,
+      background: { r: 220, g: 20, b: 60, alpha: 1 },
+    },
+  });
+  switch (format) {
+    case "jpeg":
+      return image.jpeg().toBuffer();
+    case "png":
+      return image.png().toBuffer();
+    case "webp":
+      return image.webp().toBuffer();
+    case "gif":
+      return image.gif().toBuffer();
+  }
+}
 
 const mocks = vi.hoisted(() => ({
   from: vi.fn(),
@@ -103,6 +128,39 @@ describe("verifyStoredImage", () => {
     expect(mocks.download).toHaveBeenCalledWith(storagePath);
   });
 
+  it.each([
+    ["jpeg", "image/jpeg"],
+    ["png", "image/png"],
+    ["webp", "image/webp"],
+    ["gif", "image/gif"],
+  ] as const)("accepts decoded %s bytes as %s", async (format, mimeType) => {
+    const bytes = await encodedFixture(format);
+    mocks.download.mockResolvedValueOnce({
+      data: new Blob([new Uint8Array(bytes)]),
+      error: null,
+    });
+
+    await expect(verifyStoredImage(storagePath)).resolves.toEqual({
+      bytes,
+      mimeType,
+    });
+  });
+
+  it("accepts a valid image at the exact 10 MB byte limit", async () => {
+    const exactLimitBytes = Buffer.concat([
+      pngBytes,
+      Buffer.alloc(10 * 1_048_576 - pngBytes.byteLength),
+    ]);
+    mocks.download.mockResolvedValueOnce({
+      data: new NodeBlob([exactLimitBytes]),
+      error: null,
+    });
+
+    const verified = await verifyStoredImage(storagePath);
+    expect(verified.mimeType).toBe("image/png");
+    expect(verified.bytes.byteLength).toBe(10 * 1_048_576);
+  });
+
   it("treats only exact object-missing as an invalid upload", async () => {
     mocks.download.mockResolvedValueOnce({
       data: null,
@@ -142,6 +200,36 @@ describe("verifyStoredImage", () => {
       data: new Blob([new Uint8Array(10 * 1_048_576 + 1)]),
       error: null,
     });
+    await expect(verifyStoredImage(storagePath)).rejects.toBeInstanceOf(
+      InvalidStoredImageError,
+    );
+  });
+
+  it("rejects zero-byte objects", async () => {
+    mocks.download.mockResolvedValueOnce({
+      data: new Blob([]),
+      error: null,
+    });
+
+    await expect(verifyStoredImage(storagePath)).rejects.toBeInstanceOf(
+      InvalidStoredImageError,
+    );
+  });
+
+  it("rejects decoded images above the 40 million pixel limit", async () => {
+    const oversizedDimensions = await sharp({
+      create: {
+        width: 6_325,
+        height: 6_325,
+        channels: 3,
+        background: { r: 1, g: 2, b: 3 },
+      },
+    }).png().toBuffer();
+    mocks.download.mockResolvedValueOnce({
+      data: new Blob([new Uint8Array(oversizedDimensions)]),
+      error: null,
+    });
+
     await expect(verifyStoredImage(storagePath)).rejects.toBeInstanceOf(
       InvalidStoredImageError,
     );

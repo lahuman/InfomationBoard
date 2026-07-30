@@ -1,12 +1,71 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(104);
+select plan(107);
 
 select has_function(
   'public',
   'reserve_board_image',
   array['uuid', 'text', 'text', 'bigint'],
   'image reservations use an authenticated RPC boundary'
+);
+select results_eq(
+  $$ select bool_and(prosecdef)
+     from pg_proc
+     where oid = any(array[
+       'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure,
+       'public.finalize_board_image(uuid,text,bigint)'::regprocedure,
+       'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure,
+       'public.complete_board_image_cancellation(uuid,uuid,uuid)'::regprocedure,
+       'public.claim_board_image_deletion(uuid,uuid,bigint)'::regprocedure,
+       'public.complete_board_image_deletion(uuid,uuid,uuid)'::regprocedure,
+       'public.claim_board_deletion(uuid)'::regprocedure,
+       'public.complete_board_deletion(uuid,uuid)'::regprocedure
+     ]) $$,
+  array[true],
+  'every image and board lifecycle RPC is security definer'
+);
+select results_eq(
+  $$ select bool_and(proconfig @> array['search_path=""']::text[])
+     from pg_proc
+     where oid = any(array[
+       'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure,
+       'public.finalize_board_image(uuid,text,bigint)'::regprocedure,
+       'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure,
+       'public.complete_board_image_cancellation(uuid,uuid,uuid)'::regprocedure,
+       'public.claim_board_image_deletion(uuid,uuid,bigint)'::regprocedure,
+       'public.complete_board_image_deletion(uuid,uuid,uuid)'::regprocedure,
+       'public.claim_board_deletion(uuid)'::regprocedure,
+       'public.complete_board_deletion(uuid,uuid)'::regprocedure
+     ]) $$,
+  array[true],
+  'every image and board lifecycle RPC fixes an empty search_path'
+);
+select results_eq(
+  $$ select count(*) = 2
+       and bool_and(trigger_proc_namespace.nspname = 'private')
+       and bool_and(
+         (
+           attachment_trigger.tgname = 'attachments_apply_storage_delta'
+           and trigger_proc.proname = 'apply_attachment_storage_delta'
+         )
+         or (
+           attachment_trigger.tgname = 'attachments_release_storage'
+           and trigger_proc.proname = 'release_attachment_storage'
+         )
+       )
+     from pg_trigger as attachment_trigger
+     join pg_proc as trigger_proc
+       on trigger_proc.oid = attachment_trigger.tgfoid
+     join pg_namespace as trigger_proc_namespace
+       on trigger_proc_namespace.oid = trigger_proc.pronamespace
+     where attachment_trigger.tgrelid = 'public.attachments'::regclass
+       and not attachment_trigger.tgisinternal
+       and attachment_trigger.tgname in (
+         'attachments_apply_storage_delta',
+         'attachments_release_storage'
+       ) $$,
+  array[true],
+  'attachment quota triggers execute only private-schema functions'
 );
 select has_function(
   'public',

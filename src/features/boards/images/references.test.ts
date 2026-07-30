@@ -14,6 +14,24 @@ describe("hasBoardImageReference", () => {
     ).toBe(true);
   });
 
+  it("honors the first duplicate definition when a later definition targets the image", () => {
+    expect(
+      hasBoardImageReference(
+        `![포스터][hero]\n\n[hero]: /other-image.png\n[hero]: ${url}`,
+        url,
+      ),
+    ).toBe(false);
+  });
+
+  it("honors the first duplicate definition when it targets the image", () => {
+    expect(
+      hasBoardImageReference(
+        `![포스터][hero]\n\n[hero]: ${url}\n[hero]: /other-image.png`,
+        url,
+      ),
+    ).toBe(true);
+  });
+
   it("does not mistake URL text for an image reference", () => {
     expect(hasBoardImageReference(`주소: ${url}`, url)).toBe(false);
   });

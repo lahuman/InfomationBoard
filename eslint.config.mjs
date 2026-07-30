@@ -22,5 +22,6 @@ export default defineConfig([
     ".next/**",
     "coverage/**",
     "playwright-report/**",
+    "supabase/.temp/**",
   ]),
 ]);
