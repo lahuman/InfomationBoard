@@ -16,6 +16,7 @@ import {
   commonmark,
   emphasisSchema,
   headingSchema,
+  insertImageCommand,
   insertHrCommand,
   liftListItemCommand,
   linkSchema,
@@ -34,7 +35,7 @@ import { gfm, remarkGFMPlugin } from "@milkdown/kit/preset/gfm";
 import { history, redoCommand, undoCommand } from "@milkdown/kit/plugin/history";
 import { listener, listenerCtx } from "@milkdown/kit/plugin/listener";
 import { callCommand, getMarkdown, replaceAll } from "@milkdown/kit/utils";
-import { sanitizeBoardUrl } from "../../markdown/url";
+import { sanitizeBoardImageUrl, sanitizeBoardUrl } from "../../markdown/url";
 import type {
   CreateMarkdownEditorController,
   MarkdownEditorCommand,
@@ -48,6 +49,7 @@ const commands: MarkdownEditorCommand[] = [
   "bold",
   "italic",
   "link",
+  "image",
   "bullet-list",
   "ordered-list",
   "blockquote",
@@ -225,6 +227,10 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
             active: hasSelectedMark(selection, doc, storedMarks, linkType),
             enabled: manager.get(toggleLinkCommand.key)()(view.state),
           },
+          image: {
+            active: false,
+            enabled: true,
+          },
           "bullet-list": {
             active: hasAncestorOfType(selection, bulletListType),
             enabled: manager.get(wrapInBulletListCommand.key)()(view.state),
@@ -281,7 +287,7 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
       run: (command, payload) => {
         const activeState = getToolbarState();
         const commandActions: Record<
-          Exclude<MarkdownEditorCommand, "link">,
+          Exclude<MarkdownEditorCommand, "link" | "image">,
           () => boolean
         > = {
           "heading-2": () =>
@@ -327,6 +333,19 @@ export const createMilkdownEditorController: CreateMarkdownEditorController =
                     )
                   : false;
               })()
+            : command === "image"
+              ? (() => {
+                  const src = payload?.src;
+                  if (!src || sanitizeBoardImageUrl(src) !== src) return false;
+
+                  return editor.action(
+                    callCommand(insertImageCommand.key, {
+                      src,
+                      alt: payload?.alt ?? "",
+                      title: "",
+                    }),
+                  );
+                })()
             : commandActions[command]();
 
         if (didRun) publishToolbarState();

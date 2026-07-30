@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { within } from "@testing-library/react";
+import { waitFor, within } from "@testing-library/react";
 import {
   __testing,
   createMilkdownEditorController,
@@ -232,6 +232,55 @@ describe("createMilkdownEditorController", () => {
     );
     expect(controller.getMarkdown()).toContain(
       "[원주 책방 틈](https://example.com)",
+    );
+  });
+
+  it("inserts a safe image at the current selection and publishes one undoable change", async () => {
+    const onMarkdownChange = vi.fn();
+    const { controller } = await setup("앞 내용\n\n뒤 내용", { onMarkdownChange });
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    __testing.selectText(controller, 3, 3);
+
+    expect(controller.run("image", { src: imageUrl, alt: "행사 포스터" })).toBe(
+      true,
+    );
+    expect(controller.getToolbarState().image).toEqual({
+      active: false,
+      enabled: true,
+    });
+    expect(controller.getMarkdown()).toContain(`![행사 포스터](${imageUrl})`);
+    await waitFor(() =>
+      expect(onMarkdownChange).toHaveBeenLastCalledWith(
+        expect.stringContaining(`![행사 포스터](${imageUrl})`),
+      ),
+    );
+
+    expect(controller.run("undo")).toBe(true);
+    expect(controller.getMarkdown()).toBe("앞 내용\n\n뒤 내용");
+  });
+
+  it("rejects missing and unsafe image sources without changing Markdown", async () => {
+    const { controller } = await setup("보존할 내용");
+    expect(controller.run("image", { alt: "행사 포스터" })).toBe(false);
+    expect(controller.run("image", { src: "javascript:alert(1)", alt: "행사 포스터" })).toBe(
+      false,
+    );
+    expect(controller.getMarkdown()).toBe("보존할 내용");
+  });
+
+  it("round-trips Markdown image alt text with escaped delimiters", async () => {
+    const imageUrl =
+      "/b/summer-market/images/11111111-1111-4111-8111-111111111111";
+    const markdown = `![대괄호 \\] 괄호 \\( \\) 역슬래시 \\\\](${imageUrl})`;
+    const { controller, root } = await setup(markdown);
+
+    expect(controller.getMarkdown()).toBe(
+      `![대괄호 \\] 괄호 ( ) 역슬래시 \\\\](${imageUrl})`,
+    );
+    expect(root.querySelector("img")).toHaveAttribute(
+      "alt",
+      "대괄호 ] 괄호 ( ) 역슬래시 \\",
     );
   });
 

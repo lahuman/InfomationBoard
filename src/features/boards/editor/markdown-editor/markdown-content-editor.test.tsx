@@ -13,6 +13,7 @@ import type {
   MarkdownEditorController,
   ToolbarState,
 } from "./types";
+import type { BoardImage } from "../../images/model";
 
 const defaultToolbarState: ToolbarState = {
   "heading-2": { active: false, enabled: true },
@@ -20,12 +21,21 @@ const defaultToolbarState: ToolbarState = {
   bold: { active: false, enabled: true },
   italic: { active: false, enabled: true },
   link: { active: false, enabled: true },
+  image: { active: false, enabled: true },
   "bullet-list": { active: false, enabled: true },
   "ordered-list": { active: false, enabled: true },
   blockquote: { active: false, enabled: true },
   "horizontal-rule": { active: false, enabled: true },
   undo: { active: false, enabled: true },
   redo: { active: false, enabled: true },
+};
+
+const image = {
+  id: "11111111-1111-4111-8111-111111111111",
+  originalFilename: "poster.png",
+  mimeType: "image/png" as const,
+  sizeBytes: 1_024,
+  url: "/b/summer-market/images/11111111-1111-4111-8111-111111111111",
 };
 
 const iconToolbarControls = [
@@ -48,6 +58,7 @@ function createFakeController(
   let markdown = "";
   let onMarkdownChange: (next: string) => void = () => undefined;
   const run = vi.fn(() => true);
+  const focus = vi.fn();
   const replaceMarkdown = vi.fn((next: string) => {
     markdown = next;
   });
@@ -59,16 +70,43 @@ function createFakeController(
       replaceMarkdown,
       run,
       getToolbarState: () => toolbarState,
-      focus: vi.fn(),
+      focus,
       destroy: vi.fn(async () => undefined),
     };
   });
   return {
     factory,
     run,
+    focus,
     replaceMarkdown,
     emitMarkdown: (next: string) => onMarkdownChange(next),
   };
+}
+
+function renderWithImageInsertion(
+  editor: ReturnType<typeof createFakeController>,
+  options: {
+    maxLength?: number;
+    onChange?: (markdown: string) => void;
+    value?: string;
+  } = {},
+) {
+  let insertImage: ((nextImage: BoardImage, alt: string) => boolean) | undefined;
+  const props = {
+    createController: editor.factory,
+    id: "board-content",
+    imageLibrary: (callback: (nextImage: BoardImage, alt: string) => boolean) => {
+      insertImage = callback;
+      return <button onClick={() => callback(image, "행사 포스터")} type="button">이미지 삽입</button>;
+    },
+    maxLength: options.maxLength ?? 200_000,
+    onChange: options.onChange ?? vi.fn<(markdown: string) => void>(),
+    value: options.value ?? "본문",
+  };
+  const rendered = render(
+    <MarkdownContentEditor {...props} />,
+  );
+  return { ...rendered, insertImage: () => insertImage };
 }
 
 it("switches between rich text and Markdown source without losing edits", async () => {
@@ -95,6 +133,99 @@ it("switches between rich text and Markdown source without losing edits", async 
   expect(editor.replaceMarkdown).toHaveBeenCalledWith(
     "## 프로그램\n\n1. 만들기",
   );
+});
+
+it("bridges a rich image insertion to the controller and restores editor focus", async () => {
+  const editor = createFakeController();
+  const { insertImage } = renderWithImageInsertion(editor);
+
+  await screen.findByRole("button", { name: "이미지 삽입" });
+  await act(async () => {
+    expect(insertImage()?.(image, "행사 포스터")).toBe(true);
+  });
+
+  expect(editor.run).toHaveBeenCalledWith("image", {
+    src: "/b/summer-market/images/11111111-1111-4111-8111-111111111111",
+    alt: "행사 포스터",
+  });
+  expect(editor.focus).toHaveBeenCalled();
+});
+
+it("inserts source image Markdown at the textarea selection with necessary newlines", async () => {
+  const editor = createFakeController();
+  const onChange = vi.fn();
+  const { insertImage } = renderWithImageInsertion(editor, {
+    onChange,
+    value: "첫 줄\n둘째 줄",
+  });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+  const source = screen.getByLabelText("본문 Markdown 원문") as HTMLTextAreaElement;
+  source.setSelectionRange(4, 4);
+
+  await act(async () => {
+    expect(insertImage()?.(image, "행사 포스터")).toBe(true);
+  });
+  expect(source).toHaveValue(
+    "첫 줄\n![행사 포스터](/b/summer-market/images/11111111-1111-4111-8111-111111111111)\n둘째 줄",
+  );
+  expect(onChange).toHaveBeenLastCalledWith(
+    "첫 줄\n![행사 포스터](/b/summer-market/images/11111111-1111-4111-8111-111111111111)\n둘째 줄",
+  );
+  await act(async () => {
+    await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+  });
+  expect(source.selectionStart).toBe(
+    "첫 줄\n![행사 포스터](/b/summer-market/images/11111111-1111-4111-8111-111111111111)".length,
+  );
+  expect(source.selectionEnd).toBe(source.selectionStart);
+});
+
+it("escapes source alt text and permits an explicitly decorative image", async () => {
+  const editor = createFakeController();
+  const first = renderWithImageInsertion(editor, { value: "" });
+
+  fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+  await act(async () => {
+    expect(first.insertImage()?.(image, "대괄호 ] 괄호 ( ) 역슬래시 \\")).toBe(true);
+  });
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    "![대괄호 \\] 괄호 \\( \\) 역슬래시 \\\\](/b/summer-market/images/11111111-1111-4111-8111-111111111111)",
+  );
+
+  first.unmount();
+  const editorForDecorativeImage = createFakeController();
+  const decorative = renderWithImageInsertion(editorForDecorativeImage, {
+    value: "",
+  });
+  fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+  await act(async () => {
+    expect(decorative.insertImage()?.(image, "")).toBe(true);
+  });
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
+    "![](/b/summer-market/images/11111111-1111-4111-8111-111111111111)",
+  );
+});
+
+it("leaves source Markdown unchanged when image insertion is unsafe or exceeds the limit", async () => {
+  const editor = createFakeController();
+  const onChange = vi.fn();
+  const initialMarkdown = "x".repeat(200_000);
+  const { insertImage } = renderWithImageInsertion(editor, {
+    maxLength: 200_000,
+    onChange,
+    value: initialMarkdown,
+  });
+  fireEvent.click(await screen.findByRole("tab", { name: "Markdown 원문" }));
+
+  expect(insertImage()?.(image, "행사 포스터")).toBe(false);
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(initialMarkdown);
+  expect(onChange).not.toHaveBeenCalled();
+
+  const unsafe = { ...image, url: "javascript:alert(1)" };
+  expect(insertImage()?.(unsafe, "행사 포스터")).toBe(false);
+  expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(initialMarkdown);
+  expect(onChange).not.toHaveBeenCalled();
 });
 
 it("exposes pressed state only for selection-sensitive toolbar commands", async () => {

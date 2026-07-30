@@ -4,6 +4,7 @@ export type MarkdownEditorCommand =
   | "bold"
   | "italic"
   | "link"
+  | "image"
   | "bullet-list"
   | "ordered-list"
   | "blockquote"
@@ -19,10 +20,16 @@ export type ToolbarState = Record<
 export type MarkdownEditorController = {
   getMarkdown(): string;
   replaceMarkdown(markdown: string): void;
-  run(command: MarkdownEditorCommand, payload?: { href?: string }): boolean;
+  run(command: MarkdownEditorCommand, payload?: MarkdownEditorPayload): boolean;
   getToolbarState(): ToolbarState;
   focus(): void;
   destroy(): Promise<void>;
+};
+
+export type MarkdownEditorPayload = {
+  href?: string;
+  src?: string;
+  alt?: string;
 };
 
 export type CreateMarkdownEditorController = (options: {

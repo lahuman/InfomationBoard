@@ -14,7 +14,9 @@ import {
   Undo2,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+import type { BoardImage } from "../../images/model";
+import { sanitizeBoardImageUrl } from "../../markdown/url";
 import { createMilkdownEditorController } from "./milkdown-editor";
 import type {
   CreateMarkdownEditorController,
@@ -29,6 +31,9 @@ type MarkdownContentEditorProps = {
   value: string;
   onChange(markdown: string): void;
   createController?: CreateMarkdownEditorController;
+  imageLibrary?: (
+    insertImage: (image: BoardImage, alt: string) => boolean,
+  ) => ReactNode;
 };
 
 type EditorMode = "rich" | "source";
@@ -84,6 +89,7 @@ const defaultToolbarState: ToolbarState = {
   bold: { active: false, enabled: true },
   italic: { active: false, enabled: true },
   link: { active: false, enabled: true },
+  image: { active: false, enabled: true },
   "bullet-list": { active: false, enabled: true },
   "ordered-list": { active: false, enabled: true },
   blockquote: { active: false, enabled: true },
@@ -98,6 +104,14 @@ const conversionError =
   "Markdown을 리치 텍스트로 변환하지 못했습니다. 원문은 그대로 보존했습니다.";
 const linkError = "안전한 http, https, mailto 또는 내부 링크를 입력해 주세요.";
 
+function escapeMarkdownAlt(alt: string): string {
+  return alt
+    .replaceAll("\\", "\\\\")
+    .replaceAll("]", "\\]")
+    .replaceAll("(", "\\(")
+    .replaceAll(")", "\\)");
+}
+
 function characterLimitError(maxLength: number) {
   return `본문은 ${maxLength.toLocaleString("ko-KR")}자까지 입력할 수 있습니다.`;
 }
@@ -108,8 +122,10 @@ export function MarkdownContentEditor({
   value,
   onChange,
   createController = createMilkdownEditorController,
+  imageLibrary,
 }: MarkdownContentEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const sourceRef = useRef<HTMLTextAreaElement>(null);
   const controllerRef = useRef<MarkdownEditorController | null>(null);
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
@@ -265,6 +281,48 @@ export function MarkdownContentEditor({
     controller.focus();
   }
 
+  function insertImage(image: BoardImage, alt: string): boolean {
+    if (sanitizeBoardImageUrl(image.url) !== image.url) return false;
+
+    if (mode === "rich") {
+      const controller = controllerRef.current;
+      if (!controller) return false;
+
+      const didInsert = controller.run("image", { src: image.url, alt });
+      if (didInsert) controller.focus();
+      return didInsert;
+    }
+
+    const source = sourceRef.current;
+    if (!source) return false;
+
+    const currentValue = latestValueRef.current;
+    const start = source.selectionStart;
+    const end = source.selectionEnd;
+    const before = currentValue.slice(0, start);
+    const after = currentValue.slice(end);
+    const markdown = `![${escapeMarkdownAlt(alt)}](${image.url})`;
+    const prefix = before && !before.endsWith("\n") ? "\n" : "";
+    const suffix = after && !after.startsWith("\n") ? "\n" : "";
+    const nextMarkdown = `${before}${prefix}${markdown}${suffix}${after}`;
+
+    if (nextMarkdown.length > maxLengthRef.current) {
+      setError(characterLimitError(maxLengthRef.current));
+      return false;
+    }
+
+    const nextSelection = before.length + prefix.length + markdown.length;
+    latestValueRef.current = nextMarkdown;
+    setSourceValue(nextMarkdown);
+    onChangeRef.current(nextMarkdown);
+    setError("");
+    requestAnimationFrame(() => {
+      source.focus();
+      source.setSelectionRange(nextSelection, nextSelection);
+    });
+    return true;
+  }
+
   const richPanelId = `${id}-rich-panel`;
   const sourcePanelId = `${id}-source-panel`;
   const richEditorHelpId = `${id}-rich-help`;
@@ -379,10 +437,12 @@ export function MarkdownContentEditor({
             onChange(nextMarkdown);
           }}
           maxLength={maxLength}
+          ref={sourceRef}
           value={sourceValue}
         />
         <p>{value.length.toLocaleString("ko-KR")} / {maxLength.toLocaleString("ko-KR")}자</p>
       </div>
+      {imageLibrary?.(insertImage)}
     </section>
   );
 }
