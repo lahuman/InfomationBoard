@@ -38,6 +38,42 @@ describe("BoardMarkdown", () => {
     expect(container.querySelector("img")).not.toBeInTheDocument();
   });
 
+  it.each([
+    [
+      "local board image",
+      "/b/summer-market/images/30000000-0000-4000-8000-000000000003",
+    ],
+    ["HTTPS image", "https://images.example.com/poster.png"],
+  ])("renders a safe %s lazily with authored alt text", (_label, src) => {
+    render(<BoardMarkdown markdown={`![여름 행사 포스터](${src})`} />);
+
+    const image = screen.getByRole("img", {
+      name: "여름 행사 포스터",
+    });
+    expect(image).toHaveAttribute("src", src);
+    expect(image).toHaveAttribute("alt", "여름 행사 포스터");
+    expect(image).toHaveAttribute("loading", "lazy");
+    expect(image).toHaveAttribute("decoding", "async");
+  });
+
+  it.each([
+    ["JavaScript", "javascript:alert(1)"],
+    ["data", "data:image/png;base64,iVBORw0KGgo="],
+    ["SVG data", "data:image/svg+xml,<svg onload=alert(1)>"],
+    ["email", "mailto:image@example.com"],
+    ["malformed local", "/b/summer-market/images/not-a-uuid"],
+    [
+      "non-v4 local",
+      "/b/summer-market/images/30000000-0000-3000-8000-000000000003",
+    ],
+  ])("does not render an image for a %s source", (_label, src) => {
+    const { container } = render(
+      <BoardMarkdown markdown={`![차단된 이미지](${src})`} />,
+    );
+
+    expect(container.querySelector("img")).not.toBeInTheDocument();
+  });
+
   it("drops unsafe links instead of rendering clickable anchors", () => {
     const { container } = render(
       <BoardMarkdown markdown="[실행하지 않음](javascript:alert(1))" />,

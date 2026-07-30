@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { isExternalBoardUrl, sanitizeBoardUrl } from "./url";
+import {
+  isExternalBoardUrl,
+  sanitizeBoardImageUrl,
+  sanitizeBoardUrl,
+} from "./url";
 
 describe("sanitizeBoardUrl", () => {
   it.each([
@@ -39,3 +43,29 @@ describe("isExternalBoardUrl", () => {
   });
 });
 
+describe("sanitizeBoardImageUrl", () => {
+  const localImage =
+    "/b/summer-market/images/30000000-0000-4000-8000-000000000003";
+
+  it.each([
+    localImage,
+    "https://images.example.com/poster.png",
+    "http://images.example.com/poster.webp",
+  ])("accepts a safe image source: %s", (url) => {
+    expect(sanitizeBoardImageUrl(url)).toBe(url);
+  });
+
+  it.each([
+    "javascript:alert(1)",
+    "data:image/png;base64,iVBORw0KGgo=",
+    "data:image/svg+xml,<svg onload=alert(1)>",
+    "mailto:image@example.com",
+    "/b/summer-market/images/not-a-uuid",
+    "/b/summer-market/images/30000000-0000-3000-8000-000000000003",
+    "/b/Summer-Market/images/30000000-0000-4000-8000-000000000003",
+    "/other/poster.png",
+    "./poster.png",
+  ])("rejects an unsafe or malformed image source: %s", (url) => {
+    expect(sanitizeBoardImageUrl(url)).toBe("");
+  });
+});

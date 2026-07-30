@@ -1,7 +1,11 @@
 import ReactMarkdown, { type Components } from "react-markdown";
 import rehypeSanitize from "rehype-sanitize";
 import remarkGfm from "remark-gfm";
-import { isExternalBoardUrl, sanitizeBoardUrl } from "./url";
+import {
+  isExternalBoardUrl,
+  sanitizeBoardImageUrl,
+  sanitizeBoardUrl,
+} from "./url";
 
 const BOARD_MARKDOWN_ELEMENTS = [
   "a",
@@ -15,6 +19,7 @@ const BOARD_MARKDOWN_ELEMENTS = [
   "h3",
   "h4",
   "hr",
+  "img",
   "li",
   "ol",
   "p",
@@ -34,11 +39,13 @@ const BOARD_SANITIZE_SCHEMA = {
   attributes: {
     a: ["href", "title"],
     code: [["className", /^language-/]],
+    img: ["src", "alt", "title"],
     td: ["align"],
     th: ["align"],
   },
   protocols: {
     href: ["http", "https", "mailto"],
+    src: ["http", "https"],
   },
   clobberPrefix: "board-",
 };
@@ -74,7 +81,31 @@ const BOARD_MARKDOWN_COMPONENTS: Components = {
       </a>
     );
   },
+  img({ alt, src, title }) {
+    const safeSrc = sanitizeBoardImageUrl(
+      typeof src === "string" ? src : "",
+    );
+    if (!safeSrc) return null;
+
+    return (
+      // Markdown images use access-controlled or author-supplied URLs.
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        alt={alt ?? ""}
+        decoding="async"
+        loading="lazy"
+        src={safeSrc}
+        title={title}
+      />
+    );
+  },
 };
+
+function sanitizeBoardMarkdownUrl(url: string, key: string): string {
+  return key === "src"
+    ? sanitizeBoardImageUrl(url)
+    : sanitizeBoardUrl(url);
+}
 
 type BoardMarkdownProps = {
   markdown: string;
@@ -96,7 +127,7 @@ export function BoardMarkdown({
         rehypePlugins={[[rehypeSanitize, BOARD_SANITIZE_SCHEMA]]}
         remarkPlugins={[remarkGfm]}
         skipHtml
-        urlTransform={sanitizeBoardUrl}
+        urlTransform={sanitizeBoardMarkdownUrl}
       >
         {markdown}
       </ReactMarkdown>
