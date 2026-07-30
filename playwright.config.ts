@@ -1,9 +1,16 @@
 import { defineConfig, devices } from "@playwright/test";
 import { loadEnvConfig } from "@next/env";
+import path from "node:path";
+import { resolvePlaywrightE2EEnvironment } from "./tests/e2e/support/e2e-configuration";
 
-const useLiveSupabase = process.env.E2E_LIVE_SUPABASE === "1";
-if (useLiveSupabase) loadEnvConfig(process.cwd());
-const baseURL = useLiveSupabase
+const managedOwnerPath = path.join(
+  process.cwd(),
+  ".playwright/.auth/owner.json",
+);
+const { useManagedLiveOwner, useRealSupabase } =
+  resolvePlaywrightE2EEnvironment(process.env, managedOwnerPath);
+if (useRealSupabase) loadEnvConfig(process.cwd());
+const baseURL = useRealSupabase
   ? "http://localhost:3000"
   : "http://127.0.0.1:3000";
 
@@ -13,7 +20,7 @@ function requiredLiveEnv(name: string) {
   return value;
 }
 
-const serverEnv = useLiveSupabase
+const serverEnv = useRealSupabase
   ? {
       NEXT_PUBLIC_APP_URL: baseURL,
       NEXT_PUBLIC_SUPABASE_URL: requiredLiveEnv("NEXT_PUBLIC_SUPABASE_URL"),
@@ -31,10 +38,10 @@ const serverEnv = useLiveSupabase
 
 export default defineConfig({
   testDir: "./tests/e2e",
-  globalSetup: useLiveSupabase
+  globalSetup: useManagedLiveOwner
     ? "./tests/e2e/support/live-global-setup.ts"
     : undefined,
-  globalTeardown: useLiveSupabase
+  globalTeardown: useManagedLiveOwner
     ? "./tests/e2e/support/live-global-teardown.ts"
     : undefined,
   fullyParallel: true,
@@ -55,7 +62,7 @@ export default defineConfig({
     command: "npm run build && npm run start",
     env: serverEnv,
     url: baseURL,
-    reuseExistingServer: useLiveSupabase ? false : !process.env.CI,
+    reuseExistingServer: useRealSupabase ? false : !process.env.CI,
     timeout: 120_000,
   },
 });

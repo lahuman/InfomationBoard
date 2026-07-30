@@ -1,11 +1,18 @@
-import { expect, test, type Page } from "@playwright/test";
+import {
+  expect,
+  test,
+  type BrowserContext,
+  type Locator,
+  type Page,
+} from "@playwright/test";
 import path from "node:path";
+import { resolvePlaywrightE2EEnvironment } from "./support/e2e-configuration";
+import { parseExactStorageMeterBytes } from "./support/image-meter";
 
-const ownerStorageState =
-  process.env.E2E_OWNER_STORAGE_STATE ??
-  (process.env.E2E_LIVE_SUPABASE === "1"
-    ? path.join(process.cwd(), ".playwright/.auth/owner.json")
-    : undefined);
+const { ownerStorageState } = resolvePlaywrightE2EEnvironment(
+  process.env,
+  path.join(process.cwd(), ".playwright/.auth/owner.json"),
+);
 
 const pngFixture = Buffer.from(
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
@@ -13,17 +20,26 @@ const pngFixture = Buffer.from(
 );
 const fixtureName = "e2e-poster.png";
 
-async function createBoard(page: Page, title: string) {
+async function createBoard(
+  page: Page,
+  title: string,
+  onCreated: (editorUrl: string) => void,
+) {
   await page.goto("/boards/new");
   await page.getByLabel("행사 안내").check();
   await page.getByRole("button", { name: "안내판 만들기" }).click();
   await expect(page).toHaveURL(/\/boards\/[^/]+\/edit$/);
+  onCreated(page.url());
   await page.getByLabel("제목").fill(title);
   await page.getByRole("tab", { name: "Markdown 원문" }).click();
   await page.getByLabel("본문 Markdown 원문").fill("## 이미지 안내");
   await expect(page.locator(".save-state")).toHaveText("저장됨", {
     timeout: 10_000,
   });
+}
+
+async function readExactStorageMeterBytes(meter: Locator) {
+  return parseExactStorageMeterBytes(await meter.getAttribute("value"));
 }
 
 async function deleteBoardIfPresent(page: Page, editorUrl: string) {
@@ -47,21 +63,32 @@ test.describe("board image upload, insertion, access, and deletion", () => {
     page,
   }) => {
     const title = `이미지 E2E ${Date.now()}`;
-    await createBoard(page, title);
-    const editorUrl = page.url();
-    const anonymous = await browser.newContext();
+    let editorUrl: string | null = null;
+    let anonymous: BrowserContext | null = null;
+    let scenarioFailed = false;
+    let scenarioError: unknown;
 
     try {
+      await createBoard(page, title, (createdEditorUrl) => {
+        editorUrl = createdEditorUrl;
+      });
+      anonymous = await browser.newContext();
+
       await page.getByRole("button", { name: "이미지" }).click();
+      const usageMeter = page.locator(
+        'meter[aria-label="이미지 저장공간 사용량"]',
+      );
+      const baselineStorageBytes =
+        await readExactStorageMeterBytes(usageMeter);
       await page.getByLabel("이미지 추가").setInputFiles({
         name: fixtureName,
         mimeType: "image/png",
         buffer: pngFixture,
       });
       await expect(page.getByText("업로드 완료", { exact: true })).toBeVisible();
-      await expect(page.locator(".image-library-usage")).toHaveText(
-        `${pngFixture.byteLength} B / 50 MB`,
-      );
+      await expect
+        .poll(() => readExactStorageMeterBytes(usageMeter))
+        .toBe(baselineStorageBytes + pngFixture.byteLength);
 
       await page
         .getByLabel(`${fixtureName} 대체 텍스트`)
@@ -141,16 +168,26 @@ test.describe("board image upload, insertion, access, and deletion", () => {
         .getByRole("button", { name: `${fixtureName} 삭제 확인` })
         .click();
       await expect(page.getByText("이미지를 삭제했습니다.")).toBeVisible();
-      await expect(page.locator(".image-library-usage")).toHaveText(
-        "0 B / 50 MB",
-      );
+      await expect
+        .poll(() => readExactStorageMeterBytes(usageMeter))
+        .toBe(baselineStorageBytes);
       expect((await visitor.request.get(imageUrl)).status()).toBe(404);
+    } catch (error) {
+      scenarioFailed = true;
+      scenarioError = error;
+    }
 
-      await anonymous.close();
-      await deleteBoardIfPresent(page, editorUrl);
-    } finally {
-      await anonymous.close().catch(() => undefined);
-      await deleteBoardIfPresent(page, editorUrl).catch(() => undefined);
+    const cleanupTasks: Promise<unknown>[] = [];
+    if (anonymous) cleanupTasks.push(anonymous.close());
+    if (editorUrl) cleanupTasks.push(deleteBoardIfPresent(page, editorUrl));
+    const cleanupResults = await Promise.allSettled(cleanupTasks);
+    const cleanupErrors = cleanupResults.flatMap((result) =>
+      result.status === "rejected" ? [result.reason] : [],
+    );
+
+    if (scenarioFailed) throw scenarioError;
+    if (cleanupErrors.length > 0) {
+      throw new AggregateError(cleanupErrors, "Board image E2E cleanup failed");
     }
   });
 });

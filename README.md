@@ -143,11 +143,12 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
 
 ## Board image library
 
-Owners can upload JPEG, PNG, WebP, and GIF images. Each decoded image is limited
-to 10 MB, each board can retain at most 20 active images, and all boards for one
-account share a 50 MB allowance. `profiles.storage_bytes` includes a reservation
-immediately and continues to include `reserved`, transiently `cancelling`, and
-`ready` rows until trusted metadata deletion releases the quota.
+Owners can upload JPEG, PNG, WebP, and GIF images. Each stored image is limited
+to 10 MiB (`10,485,760` bytes), each board can retain at most 20 active image
+rows, and all boards for one account share a 50 MiB allowance.
+`profiles.storage_bytes` includes a reservation immediately and continues to
+include `reserved`, transiently `cancelling`, `ready`, and transiently
+`deleting` rows until trusted metadata deletion releases the quota.
 
 Image bytes stay in the private `board-images` bucket. Markdown stores stable
 `/b/[slug]/images/[attachment-id]` URLs, so image delivery inherits the parent
@@ -165,7 +166,9 @@ E2E_LIVE_SUPABASE=1 \
 
 The live Playwright setup creates and removes a temporary authenticated owner.
 Alternatively, set `E2E_OWNER_STORAGE_STATE` to an authenticated Playwright
-storage-state file as described above.
+storage-state file as described above. Supplying that path also requires the
+real Supabase environment variables; Playwright will not run an authenticated
+storage state against the fake browser-test configuration.
 
 Supabase CLI 2.110 currently generates
 `finalize_board_image.reservation_expires_at` as `string` even though a

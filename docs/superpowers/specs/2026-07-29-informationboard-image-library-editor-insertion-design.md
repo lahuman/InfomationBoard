@@ -12,15 +12,16 @@ current position in that board's rich Markdown editor.
 
 This design replaces the earlier 100 MB beta allowance with 50 MB. It narrows
 the first attachment release to inline images only; general file attachments
-remain deferred. The existing 10 MB per-file and 20-images-per-board limits
-remain in force.
+remain deferred. The existing 10 MiB stored-byte limit per file and
+20-images-per-board limit remain in force.
 
 ## 2. Confirmed Product Behavior
 
 - Images are owned by a board. An image uploaded to one board is not offered in
   another board's image picker.
-- Quota is owned by the account. Reserved, transiently cancelling, and ready
-  images across all of an owner's boards count toward the same 50 MB total.
+- Quota is owned by the account. Reserved, transiently cancelling, ready, and
+  transiently deleting images across all of an owner's boards count toward the
+  same 50 MB total.
 - Accepted formats are JPEG, PNG, WebP, and GIF. SVG is excluded because it can
   contain active content.
 - The browser rejects obviously invalid selections early, but database and
@@ -61,8 +62,8 @@ draft, and owner access therefore follow the same rules as the board itself.
 ### Limits
 
 - Account limit: `52,428,800` bytes (50 MiB).
-- Per-image limit: `10,485,760` bytes (10 MiB).
-- Per-board limit: 20 reserved, cancelling, or ready image rows.
+- Per-image stored-byte limit: `10,485,760` bytes (10 MiB).
+- Per-board limit: 20 reserved, cancelling, ready, or deleting image rows.
 - Reservation lifetime: 15 minutes.
 
 UI copy uses MB consistently with the existing binary byte formatter.
@@ -76,13 +77,15 @@ The existing attachment columns remain sufficient:
   untrusted filename;
 - `original_filename`, `mime_type`, and `size_bytes` hold verified display
   metadata;
-- `state` is `reserved` during upload, `cancelling` while server cleanup owns
-  the object-removal claim, and `ready` after verification;
+- `state` is `reserved` during upload, `cancelling` while failed-upload cleanup
+  owns the object-removal claim, `ready` after verification, and `deleting`
+  while ready-image cleanup owns the claim;
 - `reservation_expires_at` is present while reserved or cancelling.
 
 A forward-only migration tightens the table to the accepted image MIME types,
-keeps the 10 MB size constraint, and adds the functions and triggers needed for
-atomic quota accounting. There is no client-written `storage_bytes` value.
+keeps the 10 MiB stored-byte constraint, and adds the functions and triggers
+needed for atomic quota accounting. There is no client-written `storage_bytes`
+value.
 
 ### Atomic quota accounting
 
@@ -109,8 +112,8 @@ for the first release.
 
 ### Storage bucket
 
-The migration creates a private `board-images` bucket with a 10 MB object limit
-and the JPEG, PNG, WebP, and GIF MIME allowlist. Paths have the form
+The migration creates a private `board-images` bucket with a 10 MiB stored
+object limit and the JPEG, PNG, WebP, and GIF MIME allowlist. Paths have the form
 `<owner-id>/<board-id>/<attachment-id>`.
 
 Authenticated clients may INSERT only when an unexpired owned attachment is
@@ -122,8 +125,8 @@ client for verification and cleanup.
 ## 5. Upload Flow
 
 1. The owner chooses one image in the board image panel.
-2. The client validates non-empty size, the 10 MB limit, accepted browser MIME,
-   the visible remaining quota, and the 20-image board limit.
+2. The client validates non-empty size, the 10 MiB stored-byte limit, accepted
+   browser MIME, the visible remaining quota, and the 20-image board limit.
 3. The reservation action authenticates the user and validates all inputs.
 4. The database atomically reserves quota and returns a random attachment ID
    and storage path.
@@ -164,7 +167,7 @@ contains:
 
 - a file chooser accepting JPEG, PNG, WebP, and GIF;
 - used and available storage against 50 MB;
-- the 10 MB per-image and 20-images-per-board limits;
+- the 10 MiB stored-byte per-image and 20-images-per-board limits;
 - per-image thumbnail, original filename, formatted size, and upload status;
 - `삽입` and `삭제` actions;
 - inline, actionable error and retry feedback.
@@ -319,8 +322,8 @@ Implementation is test-driven.
 - a reservation within 50 MB succeeds and increments usage;
 - a reservation above 50 MB fails without inserting or changing usage;
 - concurrent-style sequential reservations cannot exceed the locked quota;
-- the 10 MB, accepted MIME, 20-per-board, ownership, state, and expiry rules are
-  enforced server-side;
+- the 10 MiB stored-byte, accepted MIME, 20-per-board, ownership, state, and
+  expiry rules are enforced server-side;
 - cancellation, deletion, board cascade, and expired cleanup release exactly
   the correct bytes;
 - authenticated users cannot edit `storage_bytes` or another owner's rows.
@@ -365,9 +368,9 @@ Implementation is test-driven.
 ## 12. Acceptance Criteria
 
 The feature is complete when every account is authoritatively limited to 50 MB
-of reserved, ready, and cancelling images; an owner can upload, view, insert,
-and safely delete board images; the dashboard and editor show accurate usage; rich and
-source editing preserve inserted image Markdown; image delivery follows the
-parent board's access rules; failures do not leak data, strand quota, or create
-silent broken references; and the database, component, server, build, and
-end-to-end verification gates pass.
+of reserved, cancelling, ready, and deleting images; an owner can upload, view,
+insert, and safely delete board images; the dashboard and editor show accurate
+usage; rich and source editing preserve inserted image Markdown; image delivery
+follows the parent board's access rules; failures do not leak data, strand quota,
+or create silent broken references; and the database, component, server, build,
+and end-to-end verification gates pass.
