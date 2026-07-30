@@ -31,6 +31,28 @@ function Harness() {
   );
 }
 
+function EmptyDialogHarness() {
+  const [open, setOpen] = useState(false);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  return (
+    <>
+      <button ref={triggerRef} onClick={() => setOpen(true)} type="button">
+        빈 대화 상자 열기
+      </button>
+      <ModalDialog
+        onClose={() => setOpen(false)}
+        open={open}
+        returnFocusRef={triggerRef}
+        title="읽기 전용 안내"
+        titleId="empty-dialog-title"
+      >
+        <p>이 대화 상자에는 조작 항목이 없습니다.</p>
+      </ModalDialog>
+    </>
+  );
+}
+
 describe("ModalDialog", () => {
   it("presents a labelled modal dialog and moves focus to its initial action", async () => {
     render(<Harness />);
@@ -61,6 +83,22 @@ describe("ModalDialog", () => {
 
     fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
     expect(last).toHaveFocus();
+  });
+
+  it("focuses and contains Tab on the dialog surface without focusable content", async () => {
+    render(<EmptyDialogHarness />);
+    await userEvent.click(
+      screen.getByRole("button", { name: "빈 대화 상자 열기" }),
+    );
+
+    const dialog = screen.getByRole("dialog", { name: "읽기 전용 안내" });
+    await waitFor(() => expect(dialog).toHaveFocus());
+
+    fireEvent.keyDown(dialog, { key: "Tab" });
+    expect(dialog).toHaveFocus();
+
+    fireEvent.keyDown(dialog, { key: "Tab", shiftKey: true });
+    expect(dialog).toHaveFocus();
   });
 
   it("closes on Escape and returns focus to the trigger", async () => {

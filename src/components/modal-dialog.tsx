@@ -51,7 +51,8 @@ export function ModalDialog({
 
     const initialFocusTarget =
       initialFocusRef?.current ??
-      dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE);
+      dialogRef.current?.querySelector<HTMLElement>(FOCUSABLE) ??
+      dialogRef.current;
     initialFocusTarget?.focus();
 
     return () => {
