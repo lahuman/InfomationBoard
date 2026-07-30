@@ -1702,6 +1702,32 @@ a {
   background: rgb(20 18 15 / 72%);
 }
 
+.modal-backdrop {
+  position: fixed;
+  z-index: 30;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 1rem;
+  background: rgb(20 18 15 / 72%);
+}
+
+.modal-dialog {
+  width: min(100%, 42rem);
+  max-height: calc(100dvh - 2rem);
+  overflow-y: auto;
+  padding: clamp(1.5rem, 4vw, 2.5rem);
+  border: 1px solid var(--foreground);
+  background: var(--background);
+  box-shadow: 0.75rem 0.75rem 0 var(--accent);
+}
+
+@media (max-width: 48rem) {
+  .modal-dialog {
+    width: calc(100vw - 2rem);
+  }
+}
+
 .delete-dialog {
   width: min(100%, 34rem);
   padding: clamp(1.5rem, 4vw, 2.5rem);
