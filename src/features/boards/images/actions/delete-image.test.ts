@@ -53,7 +53,7 @@ vi.mock("@/lib/supabase/admin", () => ({
 }));
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.calls.length = 0;
   mocks.requireUser.mockResolvedValue({ id: ownerId, email: null });
 
@@ -293,10 +293,131 @@ describe("deleteBoardImage", () => {
     expect(mocks.profileSingle).not.toHaveBeenCalled();
   });
 
-  it("returns the claimed board revision when usage refresh fails after completion", async () => {
+  it("keeps the irreversible deleted result when usage refresh fails after completion", async () => {
     mocks.profileSingle.mockResolvedValueOnce({
       data: null,
       error: { message: "unavailable" },
+    });
+
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "deleted",
+      boardRevision: 8,
+    });
+  });
+
+  it("recovers the committed revision when the claim response throws ambiguously", async () => {
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+        },
+        error: null,
+      });
+    mocks.rpc.mockRejectedValueOnce(new Error("connection reset"));
+
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "error",
+      message: "이미지를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      boardRevision: 8,
+    });
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("recovers a concurrently completed deletion from a malformed claim response", async () => {
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    mocks.rpc.mockResolvedValueOnce({ data: [], error: null });
+
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "deleted",
+      boardRevision: 8,
+    });
+    expect(mocks.remove).not.toHaveBeenCalled();
+  });
+
+  it("re-reads authoritative state when a claim response mismatches the requested path", async () => {
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+        },
+        error: null,
+      });
+    mocks.rpc.mockResolvedValueOnce({
+      data: [{
+        id: attachmentId,
+        owner_id: ownerId,
+        storage_path: `${storagePath}-wrong`,
+        state: "deleting",
+        board_revision: 8,
+      }],
+      error: null,
     });
 
     await expect(
@@ -306,6 +427,7 @@ describe("deleteBoardImage", () => {
       message: "이미지를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
       boardRevision: 8,
     });
+    expect(mocks.remove).not.toHaveBeenCalled();
   });
 
   it("does not remove when the saved board revision changed before the claim", async () => {

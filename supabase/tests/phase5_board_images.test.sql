@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(102);
+select plan(104);
 
 select has_function(
   'public',
@@ -911,6 +911,22 @@ select results_eq(
      where attachments.original_filename = 'ready.webp' $$,
   array['deleting'::text],
   'an owner atomically claims a ready image for deletion'
+);
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       (select id from public.attachments
+        where original_filename = 'ready.webp'),
+       'image/webp', 2048
+     ) $$,
+  'P0001', 'image_deletion_in_progress',
+  'a delayed or duplicate finalize cannot resurrect a deleting image'
+);
+select results_eq(
+  $$ select state
+     from public.attachments
+     where original_filename = 'ready.webp' $$,
+  array['deleting'::text],
+  'a rejected finalize leaves the claimed deletion state intact'
 );
 select results_eq(
   $$ select storage_bytes from public.profiles

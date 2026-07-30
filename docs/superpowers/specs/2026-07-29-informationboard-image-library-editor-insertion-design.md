@@ -145,6 +145,9 @@ client for verification and cleanup.
     A finalize transport failure first re-reads the owned row: a matching
     `ready` row recovers success, a confirmed `reserved` row may be cancelled,
     and an ambiguous read or `cancelling` row is retained for safe retry.
+    Database finalization is explicitly `reserved`-only; a delayed or duplicate
+    finalize receives a stable error for `cancelling` or `deleting` and cannot
+    restore either lifecycle state to `ready`.
 
 Only ready attachments can be inserted or served. An upload may not overwrite
 an existing path.
@@ -248,14 +251,23 @@ The image claim locks the board, compares a required non-null saved revision,
 and bumps/returns the revision with every post-claim action result. A save that
 won the lock first makes the claim fail stale; a save that lost the lock keeps
 its older optimistic revision and conflicts instead of committing a newly
-referenced deleted image.
+referenced deleted image. If the claim response is thrown, malformed, or does
+not match the requested server-resolved row, the action re-reads the board and
+attachment authoritatively: `deleting` returns a retryable error with the
+current revision, while an absent attachment returns `deleted` with that
+revision. Once trusted completion succeeds, later usage refresh failure cannot
+reverse the result; `deleted` may omit `storageBytes` so the UI removes the row
+and refreshes or recomputes usage separately.
 
 Board deletion first claims the owned board with `deletion_started_at`, making
 it private and non-published, then enumerates every server-resolved attachment
 path. After one batched Storage removal, a service-role-only completion deletes
 the board and cascades its attachments. A failed Storage call leaves the claim,
 metadata, and quota retryable. Authenticated users cannot directly delete the
-board or update its claim column.
+board or update its claim column. If a retry receives a batch-level error, the
+server checks each previously resolved path individually and accepts only
+success or the exact object-missing response for every path before completing;
+bucket, route, authorization, and other errors remain fail-closed.
 
 Reservation already takes a `FOR KEY SHARE` board lock. The board claim first
 takes `FOR UPDATE`, which conflicts with that lock, and the Storage INSERT

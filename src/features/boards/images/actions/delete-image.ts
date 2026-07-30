@@ -51,9 +51,13 @@ const DELETE_ERROR_MESSAGE =
   "이미지를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.";
 
 export type DeleteBoardImageResult =
-  | { status: "deleted"; storageBytes: number; boardRevision: number }
+  | { status: "deleted"; storageBytes?: number; boardRevision: number }
   | { status: "in_use"; message: string }
   | { status: "error"; message: string; boardRevision?: number };
+
+type AuthenticatedClient = Awaited<
+  ReturnType<typeof createServerSupabaseClient>
+>;
 
 function safeError(boardRevision?: number): DeleteBoardImageResult {
   return {
@@ -61,6 +65,74 @@ function safeError(boardRevision?: number): DeleteBoardImageResult {
     message: DELETE_ERROR_MESSAGE,
     ...(boardRevision === undefined ? {} : { boardRevision }),
   };
+}
+
+function revalidateDeletedImage(
+  editorPath: string,
+  slug: string,
+  imageUrl: string,
+): void {
+  revalidatePath(editorPath);
+  revalidatePath("/dashboard");
+  revalidatePath(`/b/${slug}`);
+  revalidatePath(imageUrl);
+}
+
+async function recoverAmbiguousClaim(
+  supabase: AuthenticatedClient,
+  input: {
+    boardId: string;
+    attachmentId: string;
+    ownerId: string;
+    storagePath: string;
+    editorPath: string;
+  },
+): Promise<DeleteBoardImageResult> {
+  let boardResult;
+  let attachmentResult;
+  try {
+    [boardResult, attachmentResult] = await Promise.all([
+      supabase
+        .from("boards")
+        .select("slug, content_markdown, revision")
+        .eq("id", input.boardId)
+        .eq("owner_id", input.ownerId)
+        .maybeSingle(),
+      supabase
+        .from("attachments")
+        .select("id, owner_id, storage_path, state")
+        .eq("id", input.attachmentId)
+        .eq("board_id", input.boardId)
+        .eq("owner_id", input.ownerId)
+        .in("state", ["ready", "deleting"])
+        .maybeSingle(),
+    ]);
+  } catch {
+    return safeError();
+  }
+
+  if (boardResult.error || attachmentResult.error) return safeError();
+  const board = boardRowSchema.safeParse(boardResult.data);
+  if (!board.success) return safeError();
+
+  if (attachmentResult.data === null) {
+    const imageUrl = boardImageUrl(board.data.slug, input.attachmentId);
+    revalidateDeletedImage(input.editorPath, board.data.slug, imageUrl);
+    return { status: "deleted", boardRevision: board.data.revision };
+  }
+
+  const attachment = attachmentRowSchema.safeParse(attachmentResult.data);
+  if (
+    attachment.success &&
+    attachment.data.state === "deleting" &&
+    attachment.data.id === input.attachmentId &&
+    attachment.data.owner_id === input.ownerId &&
+    attachment.data.storage_path === input.storagePath
+  ) {
+    return safeError(board.data.revision);
+  }
+
+  return safeError();
 }
 
 export async function deleteBoardImage(input: {
@@ -121,10 +193,24 @@ export async function deleteBoardImage(input: {
       p_board_revision: board.data.revision,
     });
   } catch {
-    return safeError();
+    return recoverAmbiguousClaim(supabase, {
+      boardId,
+      attachmentId,
+      ownerId: user.id,
+      storagePath: attachment.data.storage_path,
+      editorPath,
+    });
   }
 
-  if (claimResult.error) return safeError();
+  if (claimResult.error) {
+    return recoverAmbiguousClaim(supabase, {
+      boardId,
+      attachmentId,
+      ownerId: user.id,
+      storagePath: attachment.data.storage_path,
+      editorPath,
+    });
+  }
   const claims = z
     .array(deletionClaimSchema)
     .length(1)
@@ -136,7 +222,13 @@ export async function deleteBoardImage(input: {
     claim.owner_id !== user.id ||
     claim.storage_path !== attachment.data.storage_path
   ) {
-    return safeError();
+    return recoverAmbiguousClaim(supabase, {
+      boardId,
+      attachmentId,
+      ownerId: user.id,
+      storagePath: attachment.data.storage_path,
+      editorPath,
+    });
   }
 
   let adminClient;
@@ -176,28 +268,26 @@ export async function deleteBoardImage(input: {
   }
   if (completeResult.error) return safeError(claim.board_revision);
 
-  let profileResult;
+  let storageBytes: number | undefined;
   try {
-    profileResult = await supabase
+    const profileResult = await supabase
       .from("profiles")
       .select("storage_bytes")
       .eq("id", user.id)
       .single();
+    const usage = storageUsageSchema.safeParse(profileResult.data);
+    if (!profileResult.error && usage.success) {
+      storageBytes = usage.data.storage_bytes;
+    }
   } catch {
-    return safeError(claim.board_revision);
+    storageBytes = undefined;
   }
-  if (profileResult.error) return safeError(claim.board_revision);
-  const usage = storageUsageSchema.safeParse(profileResult.data);
-  if (!usage.success) return safeError(claim.board_revision);
 
-  revalidatePath(editorPath);
-  revalidatePath("/dashboard");
-  revalidatePath(`/b/${board.data.slug}`);
-  revalidatePath(imageUrl);
+  revalidateDeletedImage(editorPath, board.data.slug, imageUrl);
 
   return {
     status: "deleted",
-    storageBytes: usage.data.storage_bytes,
+    ...(storageBytes === undefined ? {} : { storageBytes }),
     boardRevision: claim.board_revision,
   };
 }

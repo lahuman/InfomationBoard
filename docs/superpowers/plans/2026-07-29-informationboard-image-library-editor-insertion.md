@@ -522,7 +522,7 @@ git commit -m "feat: add verified image upload lifecycle"
 
 - [ ] **Step 1: Write failing image deletion tests**
 
-Assert invalid IDs fail before auth; foreign/missing images use a generic safe result; only an owned ready or already-deleting row is considered; saved Markdown image nodes block deletion; plain text and links with the same URL do not; claim precedes Storage removal and service-role completion; a missing object is treated idempotently; storage failure retains deleting metadata/quota; and successful deletion returns current `storageBytes`.
+Assert invalid IDs fail before auth; foreign/missing images use a generic safe result; only an owned ready or already-deleting row is considered; saved Markdown image nodes block deletion; plain text and links with the same URL do not; claim precedes Storage removal and service-role completion; a missing object is treated idempotently; storage failure retains deleting metadata/quota; ambiguous claim responses recover authoritative deletion state and revision; and successful deletion returns current `storageBytes` when the follow-up usage read is available.
 
 ```ts
 expect(await deleteBoardImage({ boardId, attachmentId })).toEqual({
@@ -535,7 +535,7 @@ expect(rpc).not.toHaveBeenCalled();
 
 - [ ] **Step 2: Extend failing board deletion tests**
 
-Mock server-resolved owned attachment paths. Assert one batched `storage.from(IMAGE_BUCKET).remove(paths)` call occurs after the board claim and before service-role completion, no storage call occurs for a board without images, storage failure preserves the claim and prevents completion, and database failure after object removal remains a safe retryable error.
+Mock server-resolved owned attachment paths. Assert one batched `storage.from(IMAGE_BUCKET).remove(paths)` call occurs after the board claim and before service-role completion, no storage call occurs for a board without images, a batch error falls back to exact per-path checks, non-object errors remain fail-closed, storage failure preserves the claim and prevents completion, and database failure after object removal remains a safe retryable error.
 
 - [ ] **Step 3: Run focused tests and observe failure**
 
@@ -559,12 +559,22 @@ rejects a stale or null revision, claims the attachment, and bumps/returns the
 board revision so an already-started autosave cannot commit a stale reference.
 Remove only the claim's server-resolved path, then call
 `complete_board_image_deletion` through the admin client. Every post-claim
-result, including a safe error, carries the new board revision. Read updated
-profile usage and revalidate the editor/dashboard/public board/image paths. A
+result where a claim may have committed, including a safe error, carries the
+authoritatively re-read board revision. A thrown, malformed, or mismatched
+claim response re-reads the owned board and attachment: `deleting` stays a
+retryable error, while an absent attachment is already `deleted`. Once trusted
+completion succeeds, preserve `deleted` even if the usage refresh fails;
+`storageBytes` is optional so Task 8 can refresh or recompute it. Revalidate
+the editor/dashboard/public board/image paths. A
 failed remove leaves the `deleting` row and quota intact for retry; only the
 exact missing-object response advances completion. Opening a library also
 retries invisible persisted `deleting` rows through server-resolved admin
 removal/completion, so a reload does not strand charged quota.
+
+Replace finalization in the same migration so only `reserved` can transition
+to `ready`; identical `ready` finalization remains idempotent, while
+`cancelling` and `deleting` return distinct stable errors. This prevents a
+delayed finalize response from resurrecting an image after deletion claims it.
 
 - [ ] **Step 5: Add storage cleanup to board deletion**
 
@@ -575,8 +585,11 @@ lock taken by `reserve_board_image`. The Storage INSERT policy also takes KEY
 SHARE on the same board row and requires `deletion_started_at is null`.
 Therefore a reservation/upload that wins the race completes before the claim
 and is included in path enumeration, while one that loses cannot create an
-object. A two-session pgTAP test holds the upload-side lock and proves the claim
-hits `lock_timeout`. Revoke direct board DELETE and `deletion_started_at`
+object. If a retry's batch removal fails, retry each server-resolved path and
+complete only when every result is success or exact object-missing. A
+two-session pgTAP test executes the real reservation RPC and real Storage
+INSERT policy under authenticated JWT context, proves both block the claim,
+and proves a winning claim rejects both later paths. Revoke direct board DELETE and `deletion_started_at`
 updates from `authenticated`; the board UPDATE policy and password publication
 RPC also exclude claimed rows so deletion is terminal/private.
 
@@ -832,7 +845,10 @@ type ImageLibraryProps = {
 Own local `images`, `storageBytes`, selected file, per-image alt text/decorative state, pending operation, delete confirmation ID, and one live-region message. Validate before upload, call the coordinator with the injected reserve/finalize/cancel actions, append only a `ready` result, and clear the file input by incrementing an input key. Require non-empty alt text unless decorative is selected. Before deletion, call `hasBoardImageReference(contentMarkdown, image.url)`; otherwise confirm and invoke the server action. Never optimistically remove a row before server success.
 Apply `boardRevision` through `onBoardRevision` on every delete result that
 contains it, including retryable post-claim errors, so the editor's next save
-uses the revision fence returned by the server.
+uses the revision fence returned by the server. On `deleted`, always remove the
+image row; apply `storageBytes` when present, otherwise refresh the library or
+recompute visible usage rather than treating the irreversible deletion as an
+error.
 
 - [ ] **Step 5: Add toolbar/panel integration and page actions**
 

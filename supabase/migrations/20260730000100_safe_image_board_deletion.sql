@@ -14,6 +14,117 @@ add constraint attachments_reservation_state
     or (state in ('ready', 'deleting') and reservation_expires_at is null)
   );
 
+create or replace function public.finalize_board_image(
+  p_attachment_id uuid,
+  p_mime_type text,
+  p_actual_size_bytes bigint
+)
+returns table (
+  id uuid,
+  storage_path text,
+  original_filename text,
+  mime_type text,
+  size_bytes bigint,
+  state text,
+  reservation_expires_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  account_id uuid := auth.uid();
+  owned_attachment public.attachments%rowtype;
+begin
+  if account_id is null then
+    raise exception 'image_not_found';
+  end if;
+
+  select attachments.*
+  into owned_attachment
+  from public.attachments
+  where attachments.id = p_attachment_id
+    and attachments.owner_id = account_id
+  for update;
+
+  if not found then
+    raise exception 'image_not_found';
+  end if;
+
+  if owned_attachment.state = 'ready' then
+    if owned_attachment.mime_type = p_mime_type
+      and owned_attachment.size_bytes = p_actual_size_bytes
+    then
+      return query
+      select
+        owned_attachment.id,
+        owned_attachment.storage_path,
+        owned_attachment.original_filename,
+        owned_attachment.mime_type,
+        owned_attachment.size_bytes,
+        owned_attachment.state,
+        owned_attachment.reservation_expires_at;
+      return;
+    end if;
+
+    raise exception 'image_already_finalized';
+  end if;
+
+  if owned_attachment.state = 'cancelling' then
+    raise exception 'image_cancellation_in_progress';
+  end if;
+
+  if owned_attachment.state = 'deleting' then
+    raise exception 'image_deletion_in_progress';
+  end if;
+
+  if owned_attachment.state <> 'reserved' then
+    raise exception 'image_invalid_state';
+  end if;
+
+  if p_actual_size_bytes is null
+    or p_actual_size_bytes <= 0
+    or p_actual_size_bytes > 10485760
+  then
+    raise exception 'image_invalid_size';
+  end if;
+
+  if p_mime_type is null
+    or p_mime_type not in (
+      'image/jpeg',
+      'image/png',
+      'image/webp',
+      'image/gif'
+    )
+  then
+    raise exception 'image_invalid_mime_type';
+  end if;
+
+  if owned_attachment.reservation_expires_at <= now() then
+    raise exception 'image_reservation_expired';
+  end if;
+
+  update public.attachments
+  set
+    mime_type = p_mime_type,
+    size_bytes = p_actual_size_bytes,
+    state = 'ready',
+    reservation_expires_at = null
+  where attachments.id = owned_attachment.id
+  returning * into owned_attachment;
+
+  return query
+  select
+    owned_attachment.id,
+    owned_attachment.storage_path,
+    owned_attachment.original_filename,
+    owned_attachment.mime_type,
+    owned_attachment.size_bytes,
+    owned_attachment.state,
+    owned_attachment.reservation_expires_at;
+end;
+$$;
+
 drop policy board_image_reserved_insert on storage.objects;
 create policy board_image_reserved_insert
 on storage.objects

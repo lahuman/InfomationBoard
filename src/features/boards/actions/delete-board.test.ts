@@ -43,7 +43,7 @@ const firstPath = `${ownerId}/${boardId}/40000000-0000-4000-8000-000000000004`;
 const secondPath = `${ownerId}/${boardId}/50000000-0000-4000-8000-000000000005`;
 
 beforeEach(() => {
-  vi.clearAllMocks();
+  vi.resetAllMocks();
   mocks.calls.length = 0;
   mocks.requireUser.mockResolvedValue({
     id: ownerId,
@@ -162,16 +162,22 @@ describe("deleteBoard", () => {
   });
 
   it("keeps the claimed board and metadata when Storage removal fails", async () => {
-    mocks.remove.mockResolvedValueOnce({
-      data: null,
-      error: { name: "StorageApiError", status: 503, message: "Unavailable" },
-    });
+    mocks.remove
+      .mockResolvedValueOnce({
+        data: null,
+        error: { name: "StorageApiError", status: 503, message: "Unavailable" },
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: { name: "StorageApiError", status: 503, message: "Unavailable" },
+      });
 
     await expect(deleteBoard({ id: boardId })).resolves.toEqual({
       status: "error",
       message: "안내판을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     });
 
+    expect(mocks.remove).toHaveBeenCalledTimes(2);
     expect(mocks.adminRpc).not.toHaveBeenCalled();
     expect(mocks.revalidatePath).not.toHaveBeenCalled();
   });
@@ -190,20 +196,61 @@ describe("deleteBoard", () => {
     expect(mocks.adminRpc).not.toHaveBeenCalled();
   });
 
-  it("does not treat a batched missing-object error as proof every path was removed", async () => {
-    mocks.remove.mockResolvedValueOnce({
-      data: null,
-      error: {
-        name: "StorageApiError",
-        status: 404,
-        message: "Object not found",
-      },
+  it("recovers a retry after prior removal by checking every path individually", async () => {
+    mocks.remove
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: "StorageApiError",
+          status: 404,
+          message: "Object not found",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: "StorageApiError",
+          status: 404,
+          message: "Object not found",
+        },
+      })
+      .mockResolvedValueOnce({ data: [], error: null });
+
+    await expect(deleteBoard({ id: boardId })).resolves.toEqual({
+      status: "deleted",
     });
+    expect(mocks.remove.mock.calls).toEqual([
+      [[firstPath, secondPath]],
+      [[firstPath]],
+      [[secondPath]],
+    ]);
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
+  });
+
+  it("fails closed when an individual retry reports a non-object 404", async () => {
+    mocks.remove
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: "StorageApiError",
+          status: 404,
+          message: "Object not found",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: "StorageApiError",
+          status: 404,
+          message: "Bucket not found",
+        },
+      });
 
     await expect(deleteBoard({ id: boardId })).resolves.toEqual({
       status: "error",
       message: "안내판을 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
     });
+    expect(mocks.remove).toHaveBeenCalledTimes(2);
     expect(mocks.adminRpc).not.toHaveBeenCalled();
   });
 

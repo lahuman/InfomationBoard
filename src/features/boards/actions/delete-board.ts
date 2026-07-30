@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { requireUser } from "@/features/auth/require-user";
 import { IMAGE_BUCKET } from "@/features/boards/images/model";
+import { isMissingStorageObjectError } from "@/features/boards/images/storage";
 import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 
@@ -102,16 +103,30 @@ export async function deleteBoard(input: {
   }
   const paths = attachmentPaths.data.map((row) => row.storage_path);
   if (paths.length > 0) {
-    let removeResult;
+    const bucket = adminClient.storage.from(IMAGE_BUCKET);
+    let batchFailed: boolean;
     try {
-      removeResult = await adminClient.storage
-        .from(IMAGE_BUCKET)
-        .remove(paths);
+      const removeResult = await bucket.remove(paths);
+      batchFailed = Boolean(removeResult.error);
     } catch {
-      return { status: "error", message: DELETE_ERROR_MESSAGE };
+      batchFailed = true;
     }
-    if (removeResult.error) {
-      return { status: "error", message: DELETE_ERROR_MESSAGE };
+
+    if (batchFailed) {
+      for (const path of paths) {
+        let removeResult;
+        try {
+          removeResult = await bucket.remove([path]);
+        } catch {
+          return { status: "error", message: DELETE_ERROR_MESSAGE };
+        }
+        if (
+          removeResult.error &&
+          !isMissingStorageObjectError(removeResult.error)
+        ) {
+          return { status: "error", message: DELETE_ERROR_MESSAGE };
+        }
+      }
     }
   }
 
