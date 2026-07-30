@@ -1,6 +1,67 @@
 import { describe, expect, it } from "vitest";
+import { runE2EScenarioWithCleanup } from "../../../tests/e2e/support/cleanup";
 import { resolvePlaywrightE2EEnvironment } from "../../../tests/e2e/support/e2e-configuration";
 import { parseExactStorageMeterBytes } from "../../../tests/e2e/support/image-meter";
+
+describe("E2E scenario cleanup arbitration", () => {
+  it("runs both cleanup paths after a post-creation scenario failure", async () => {
+    const events: string[] = [];
+
+    await runE2EScenarioWithCleanup(
+      async () => {
+        events.push("board created");
+        throw new Error("scenario failed");
+      },
+      [
+        async () => {
+          events.push("anonymous context closed");
+        },
+        async () => {
+          events.push("board deleted");
+        },
+      ],
+    ).catch(() => undefined);
+
+    expect(events).toEqual([
+      "board created",
+      "anonymous context closed",
+      "board deleted",
+    ]);
+  });
+
+  it("preserves the scenario error when cleanup also rejects", async () => {
+    const scenarioError = new Error("scenario failed");
+    const cleanupError = new Error("cleanup failed");
+
+    await expect(
+      runE2EScenarioWithCleanup(
+        async () => {
+          throw scenarioError;
+        },
+        [async () => Promise.reject(cleanupError)],
+      ),
+    ).rejects.toBe(scenarioError);
+  });
+
+  it("surfaces cleanup rejection after a successful scenario", async () => {
+    const cleanupError = new Error("cleanup failed");
+    let laterCleanupRan = false;
+
+    try {
+      await runE2EScenarioWithCleanup(async () => undefined, [
+        async () => Promise.reject(cleanupError),
+        async () => {
+          laterCleanupRan = true;
+        },
+      ]);
+      throw new Error("expected cleanup to fail");
+    } catch (error) {
+      expect(error).toBeInstanceOf(AggregateError);
+      expect((error as AggregateError).errors).toEqual([cleanupError]);
+    }
+    expect(laterCleanupRan).toBe(true);
+  });
+});
 
 describe("Playwright Supabase environment selection", () => {
   const managedOwnerPath = "/workspace/.playwright/.auth/owner.json";
