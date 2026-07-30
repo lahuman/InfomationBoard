@@ -114,6 +114,22 @@ describe("reserveBoardImage", () => {
     expect(calls).toEqual(["cleanup", "reserve_board_image"]);
   });
 
+  it("normalizes Unicode to NFC before enforcing the 180-code-point boundary", async () => {
+    await reserveBoardImage({
+      boardId,
+      originalFilename: `../${"e\u0301".repeat(181)}.png`,
+      mimeType: "image/png",
+      sizeBytes: 120,
+    });
+
+    expect(mocks.rpc).toHaveBeenCalledWith("reserve_board_image", {
+      p_board_id: boardId,
+      p_original_filename: "é".repeat(180),
+      p_mime_type: "image/png",
+      p_size_bytes: 120,
+    });
+  });
+
   it.each([
     ["image_quota_exceeded", "quota"],
     ["image_limit_exceeded", "limit"],

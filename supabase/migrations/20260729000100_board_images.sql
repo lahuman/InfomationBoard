@@ -43,21 +43,109 @@ grant select on public.attachments to authenticated;
 
 lock table public.attachments in share row exclusive mode;
 
+create function private.normalize_board_image_filename(p_filename text)
+returns text
+language plpgsql
+immutable
+set search_path = ''
+as $$
+declare
+  normalized_filename text;
+begin
+  if p_filename is null then
+    return null;
+  end if;
+
+  normalized_filename := regexp_replace(
+    p_filename,
+    '[[:cntrl:]]',
+    '',
+    'g'
+  );
+  normalized_filename := regexp_replace(
+    normalized_filename,
+    '^.*[/\\]',
+    ''
+  );
+  normalized_filename := normalize(btrim(normalized_filename), NFC);
+
+  if normalized_filename = '' then
+    normalized_filename := 'image';
+  end if;
+
+  return left(normalized_filename, 180);
+end;
+$$;
+
+revoke all on function private.normalize_board_image_filename(text)
+from public, anon, authenticated;
+
 create function private.reconcile_board_image_attachments()
 returns void
 language plpgsql
 security definer
 set search_path = ''
 as $$
+declare
+  unsupported_attachment_count bigint;
+  over_limit_owner_id uuid;
+  recorded_storage_bytes bigint;
+  attachment_storage_bytes bigint;
 begin
-  -- Incompatible legacy metadata cannot be truthfully reclassified as images.
-  delete from public.attachments
+  select count(*)
+  into unsupported_attachment_count
+  from public.attachments
   where attachments.mime_type not in (
     'image/jpeg',
     'image/png',
     'image/webp',
     'image/gif'
   );
+
+  if unsupported_attachment_count > 0 then
+    raise exception using
+      errcode = 'P0001',
+      message = 'board_image_migration_unsupported_attachments',
+      detail = format(
+        '%s attachment row(s) use a MIME type outside JPEG, PNG, WebP, and GIF.',
+        unsupported_attachment_count
+      ),
+      hint = 'Inventory and migrate or remove unsupported attachment metadata and Storage objects before applying 20260729000100.';
+  end if;
+
+  select
+    profiles.id,
+    profiles.storage_bytes,
+    coalesce(sum(attachments.size_bytes), 0)
+  into
+    over_limit_owner_id,
+    recorded_storage_bytes,
+    attachment_storage_bytes
+  from public.profiles
+  left join public.attachments
+    on attachments.owner_id = profiles.id
+  group by profiles.id, profiles.storage_bytes
+  having profiles.storage_bytes > 52428800
+    or coalesce(sum(attachments.size_bytes), 0) > 52428800
+  order by profiles.id
+  limit 1;
+
+  if found then
+    raise exception using
+      errcode = 'P0001',
+      message = 'board_image_migration_account_over_quota',
+      detail = format(
+        'Owner %s has %s recorded byte(s) and %s attachment byte(s).',
+        over_limit_owner_id,
+        recorded_storage_bytes,
+        attachment_storage_bytes
+      ),
+      hint = 'Reduce both recorded and attachment-backed usage to 52428800 bytes or less before applying 20260729000100.';
+  end if;
+
+  update public.attachments
+  set original_filename =
+    private.normalize_board_image_filename(attachments.original_filename);
 
   update public.profiles
   set storage_bytes = coalesce(
@@ -84,6 +172,13 @@ add constraint attachments_size_bytes_bounds
   check (size_bytes > 0 and size_bytes <= 10485760),
 add constraint attachments_mime_type
   check (mime_type in ('image/jpeg', 'image/png', 'image/webp', 'image/gif')),
+add constraint attachments_original_filename_boundary
+  check (
+    original_filename =
+      private.normalize_board_image_filename(original_filename)
+    and char_length(original_filename) between 1 and 180
+    and original_filename !~ '[[:cntrl:]]'
+  ),
 add constraint attachments_state
   check (state in ('reserved', 'cancelling', 'ready')),
 add constraint attachments_reservation_state
@@ -183,6 +278,7 @@ declare
   active_image_count bigint;
   current_storage_bytes bigint;
   reserved_attachment public.attachments%rowtype;
+  normalized_filename text;
 begin
   if account_id is null then
     raise exception 'image_not_found';
@@ -232,6 +328,13 @@ begin
     raise exception 'image_invalid_mime_type';
   end if;
 
+  normalized_filename :=
+    private.normalize_board_image_filename(p_original_filename);
+
+  if normalized_filename is null then
+    raise exception 'image_invalid_filename';
+  end if;
+
   select count(*)
   into active_image_count
   from public.attachments
@@ -256,7 +359,7 @@ begin
     p_board_id,
     account_id,
     account_id::text || '/' || p_board_id::text || '/' || attachment_id::text,
-    p_original_filename,
+    normalized_filename,
     p_mime_type,
     p_size_bytes,
     'reserved',
@@ -276,6 +379,8 @@ end;
 $$;
 
 create function public.finalize_board_image(
+  p_owner_id uuid,
+  p_board_id uuid,
   p_attachment_id uuid,
   p_mime_type text,
   p_actual_size_bytes bigint
@@ -294,18 +399,14 @@ security definer
 set search_path = ''
 as $$
 declare
-  account_id uuid := auth.uid();
   owned_attachment public.attachments%rowtype;
 begin
-  if account_id is null then
-    raise exception 'image_not_found';
-  end if;
-
   select attachments.*
   into owned_attachment
   from public.attachments
   where attachments.id = p_attachment_id
-    and attachments.owner_id = account_id
+    and attachments.board_id = p_board_id
+    and attachments.owner_id = p_owner_id
   for update;
 
   if not found then
@@ -481,8 +582,10 @@ $$;
 
 revoke all on function public.reserve_board_image(uuid, text, text, bigint)
 from public, anon, authenticated;
-revoke all on function public.finalize_board_image(uuid, text, bigint)
-from public, anon, authenticated;
+revoke all on function public.finalize_board_image(
+  uuid, uuid, uuid, text, bigint
+)
+from public, anon, authenticated, service_role;
 revoke all on function public.claim_board_image_cancellation(uuid, uuid)
 from public, anon, authenticated;
 revoke all on function public.complete_board_image_cancellation(uuid, uuid, uuid)
@@ -492,8 +595,10 @@ from public, anon, authenticated;
 
 grant execute on function public.reserve_board_image(uuid, text, text, bigint)
 to authenticated;
-grant execute on function public.finalize_board_image(uuid, text, bigint)
-to authenticated;
+grant execute on function public.finalize_board_image(
+  uuid, uuid, uuid, text, bigint
+)
+to service_role;
 grant execute on function public.claim_board_image_cancellation(uuid, uuid)
 to authenticated;
 grant execute on function public.complete_board_image_cancellation(uuid, uuid, uuid)

@@ -22,6 +22,7 @@ const mocks = vi.hoisted(() => ({
   profileIdEq: vi.fn(),
   profileSingle: vi.fn(),
   rpc: vi.fn(),
+  adminRpc: vi.fn(),
 }));
 
 vi.mock("server-only", () => ({}));
@@ -30,6 +31,11 @@ vi.mock("@/lib/supabase/server", () => ({
   createServerSupabaseClient: vi.fn(async () => ({
     from: mocks.from,
     rpc: mocks.rpc,
+  })),
+}));
+vi.mock("@/lib/supabase/admin", () => ({
+  createAdminSupabaseClient: vi.fn(() => ({
+    rpc: mocks.adminRpc,
   })),
 }));
 vi.mock("../storage", async (importOriginal) => {
@@ -88,6 +94,7 @@ beforeEach(() => {
     mimeType: "image/png",
   });
   mocks.rpc.mockResolvedValue({ data: [readyRpcRow()], error: null });
+  mocks.adminRpc.mockResolvedValue({ data: [readyRpcRow()], error: null });
   mocks.profileSingle.mockResolvedValue({
     data: { storage_bytes: verifiedBytes.byteLength },
     error: null,
@@ -126,11 +133,14 @@ describe("finalizeBoardImage", () => {
     expect(mocks.attachmentIdEq).toHaveBeenCalledWith("id", attachmentId);
     expect(mocks.attachmentBoardEq).toHaveBeenCalledWith("board_id", boardId);
     expect(mocks.attachmentOwnerEq).toHaveBeenCalledWith("owner_id", ownerId);
-    expect(mocks.rpc).toHaveBeenCalledWith("finalize_board_image", {
+    expect(mocks.adminRpc).toHaveBeenCalledWith("finalize_board_image", {
+      p_owner_id: ownerId,
+      p_board_id: boardId,
       p_attachment_id: attachmentId,
       p_mime_type: "image/png",
       p_actual_size_bytes: verifiedBytes.byteLength,
     });
+    expect(mocks.rpc).not.toHaveBeenCalled();
   });
 
   it("supports an idempotent retry of an already-ready row", async () => {
@@ -147,7 +157,8 @@ describe("finalizeBoardImage", () => {
       finalizeBoardImage({ boardId, attachmentId }),
     ).resolves.toMatchObject({ status: "ready" });
 
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.cancelBoardImageReservation).not.toHaveBeenCalled();
   });
 
@@ -165,12 +176,12 @@ describe("finalizeBoardImage", () => {
           error: null,
         });
       if (mode === "returned error") {
-        mocks.rpc.mockResolvedValueOnce({
+        mocks.adminRpc.mockResolvedValueOnce({
           data: null,
           error: { message: "response lost" },
         });
       } else {
-        mocks.rpc.mockRejectedValueOnce(new Error("response lost"));
+        mocks.adminRpc.mockRejectedValueOnce(new Error("response lost"));
       }
 
       await expect(
@@ -183,7 +194,7 @@ describe("finalizeBoardImage", () => {
   );
 
   it("does not destructively clean up when post-RPC state is ambiguous", async () => {
-    mocks.rpc.mockRejectedValueOnce(new Error("response lost"));
+    mocks.adminRpc.mockRejectedValueOnce(new Error("response lost"));
     mocks.attachmentMaybeSingle
       .mockResolvedValueOnce({ data: attachment(), error: null })
       .mockResolvedValueOnce({ data: null, error: { message: "read failed" } });
@@ -195,7 +206,7 @@ describe("finalizeBoardImage", () => {
   });
 
   it("does not interfere when cancellation won the finalize race", async () => {
-    mocks.rpc.mockResolvedValueOnce({
+    mocks.adminRpc.mockResolvedValueOnce({
       data: null,
       error: { code: "P0001", message: "image_cancellation_in_progress" },
     });
@@ -246,7 +257,7 @@ describe("finalizeBoardImage", () => {
     ["image_reservation_expired", "expired"],
     ["image_quota_exceeded", "quota"],
   ] as const)("rechecks reserved state after %s then claims cleanup", async (message, code) => {
-    mocks.rpc.mockResolvedValueOnce({
+    mocks.adminRpc.mockResolvedValueOnce({
       data: null,
       error: { code: "P0001", message },
     });

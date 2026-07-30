@@ -197,6 +197,7 @@ export type Database = {
           p_attachment_id: string
           p_board_id: string
           p_board_revision: number
+          p_owner_id: string
         }
         Returns: {
           board_revision: number
@@ -234,7 +235,9 @@ export type Database = {
         Args: {
           p_actual_size_bytes: number
           p_attachment_id: string
+          p_board_id: string
           p_mime_type: string
+          p_owner_id: string
         }
         Returns: {
           id: string

@@ -2,6 +2,7 @@
 
 import { z } from "zod";
 import { requireUser } from "@/features/auth/require-user";
+import { createAdminSupabaseClient } from "@/lib/supabase/admin";
 import { createServerSupabaseClient } from "@/lib/supabase/server";
 import {
   ACCEPTED_IMAGE_MIME_TYPES,
@@ -273,11 +274,16 @@ export async function finalizeBoardImage(
   let finalizeData: unknown = null;
   let finalizeError: unknown;
   try {
-    const result = await supabase.rpc("finalize_board_image", {
-      p_attachment_id: attachment.id,
-      p_mime_type: verified.mimeType,
-      p_actual_size_bytes: verified.bytes.byteLength,
-    });
+    const result = await createAdminSupabaseClient().rpc(
+      "finalize_board_image",
+      {
+        p_owner_id: user.id,
+        p_board_id: parsed.data.boardId,
+        p_attachment_id: attachment.id,
+        p_mime_type: verified.mimeType,
+        p_actual_size_bytes: verified.bytes.byteLength,
+      },
+    );
     finalizeData = result.data;
     finalizeError = result.error;
   } catch (error) {

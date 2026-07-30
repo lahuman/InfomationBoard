@@ -64,7 +64,9 @@ function normalizeDisplayFilename(filename: string): string {
     })
     .join("");
   const basename = withoutControls.split(/[\\/]/).at(-1)?.trim() ?? "";
-  return Array.from(basename || "image").slice(0, 180).join("");
+  return Array.from((basename || "image").normalize("NFC"))
+    .slice(0, 180)
+    .join("");
 }
 
 function applicationErrorMessage(error: unknown): string | null {

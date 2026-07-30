@@ -116,6 +116,18 @@ beforeEach(() => {
   });
   mocks.adminRpc.mockImplementation(async (name: string) => {
     mocks.calls.push(name);
+    if (name === "claim_board_image_deletion") {
+      return {
+        data: [{
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+          board_revision: 8,
+        }],
+        error: null,
+      };
+    }
     return { data: undefined, error: null };
   });
 });
@@ -210,11 +222,16 @@ describe("deleteBoardImage", () => {
       boardRevision: 8,
     });
 
-    expect(mocks.rpc).toHaveBeenCalledWith("claim_board_image_deletion", {
-      p_board_id: boardId,
-      p_attachment_id: attachmentId,
-      p_board_revision: 7,
-    });
+    expect(mocks.adminRpc).toHaveBeenNthCalledWith(
+      1,
+      "claim_board_image_deletion",
+      {
+        p_owner_id: ownerId,
+        p_board_id: boardId,
+        p_attachment_id: attachmentId,
+        p_board_revision: 7,
+      },
+    );
     expect(mocks.storageFrom).toHaveBeenCalledWith("board-images");
     expect(mocks.remove).toHaveBeenCalledWith([storagePath]);
     expect(mocks.adminRpc).toHaveBeenCalledWith(
@@ -225,7 +242,7 @@ describe("deleteBoardImage", () => {
         p_attachment_id: attachmentId,
       },
     );
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
+    expect(mocks.rpc).not.toHaveBeenCalled();
     expect(mocks.calls).toEqual([
       "claim_board_image_deletion",
       "remove",
@@ -250,7 +267,7 @@ describe("deleteBoardImage", () => {
       storageBytes: 1024,
       boardRevision: 8,
     });
-    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(2);
   });
 
   it("leaves the deleting metadata and quota for retry when Storage removal fails", async () => {
@@ -271,15 +288,58 @@ describe("deleteBoardImage", () => {
       boardRevision: 8,
     });
 
-    expect(mocks.rpc).toHaveBeenCalledTimes(1);
-    expect(mocks.adminRpc).not.toHaveBeenCalled();
+    expect(mocks.rpc).not.toHaveBeenCalled();
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
     expect(mocks.profileSingle).not.toHaveBeenCalled();
   });
 
   it("returns a safe retryable error when trusted completion fails", async () => {
-    mocks.adminRpc.mockResolvedValueOnce({
-      data: null,
-      error: { message: "sensitive database details" },
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+        },
+        error: null,
+      });
+    mocks.adminRpc.mockImplementation(async (name: string) => {
+      mocks.calls.push(name);
+      if (name === "claim_board_image_deletion") {
+        return {
+          data: [{
+            id: attachmentId,
+            owner_id: ownerId,
+            storage_path: storagePath,
+            state: "deleting",
+            board_revision: 8,
+          }],
+          error: null,
+        };
+      }
+      return {
+        data: null,
+        error: { message: "sensitive database details" },
+      };
     });
 
     const result = await deleteBoardImage({ boardId, attachmentId });
@@ -291,6 +351,163 @@ describe("deleteBoardImage", () => {
     });
     expect(JSON.stringify(result)).not.toContain("sensitive");
     expect(mocks.profileSingle).not.toHaveBeenCalled();
+  });
+
+  it("keeps an image_not_found completion response recoverable on the next retry", async () => {
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "deleting",
+        },
+        error: null,
+      });
+    mocks.remove
+      .mockResolvedValueOnce({ data: [], error: null })
+      .mockResolvedValueOnce({
+        data: null,
+        error: {
+          name: "StorageApiError",
+          status: 404,
+          message: "Object not found",
+        },
+      });
+    let adminCall = 0;
+    mocks.adminRpc.mockImplementation(async (name: string) => {
+      mocks.calls.push(name);
+      adminCall += 1;
+      if (adminCall === 1) {
+        return {
+          data: [{
+            id: attachmentId,
+            owner_id: ownerId,
+            storage_path: storagePath,
+            state: "deleting",
+            board_revision: 8,
+          }],
+          error: null,
+        };
+      }
+      if (adminCall === 2) {
+        return {
+          data: null,
+          error: { code: "P0001", message: "image_not_found" },
+        };
+      }
+      if (adminCall === 3) {
+        return {
+          data: [{
+            id: attachmentId,
+            owner_id: ownerId,
+            storage_path: storagePath,
+            state: "deleting",
+            board_revision: 9,
+          }],
+          error: null,
+        };
+      }
+      return { data: undefined, error: null };
+    });
+
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "error",
+      message: "이미지를 삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+      boardRevision: 8,
+    });
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "deleted",
+      storageBytes: 1024,
+      boardRevision: 9,
+    });
+
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(4);
+    expect(mocks.remove).toHaveBeenCalledTimes(2);
+  });
+
+  it("authoritatively recovers deletion when completion commits but its response is lost", async () => {
+    mocks.boardMaybeSingle
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 7 },
+        error: null,
+      })
+      .mockResolvedValueOnce({
+        data: { slug, content_markdown: "# 일정", revision: 8 },
+        error: null,
+      });
+    mocks.attachmentMaybeSingle
+      .mockResolvedValueOnce({
+        data: {
+          id: attachmentId,
+          owner_id: ownerId,
+          storage_path: storagePath,
+          state: "ready",
+        },
+        error: null,
+      })
+      .mockResolvedValueOnce({ data: null, error: null });
+    mocks.adminRpc.mockImplementation(async (name: string) => {
+      mocks.calls.push(name);
+      if (name === "claim_board_image_deletion") {
+        return {
+          data: [{
+            id: attachmentId,
+            owner_id: ownerId,
+            storage_path: storagePath,
+            state: "deleting",
+            board_revision: 8,
+          }],
+          error: null,
+        };
+      }
+      throw new Error("response lost after commit");
+    });
+
+    await expect(
+      deleteBoardImage({ boardId, attachmentId }),
+    ).resolves.toEqual({
+      status: "deleted",
+      boardRevision: 8,
+    });
+
+    expect(mocks.boardMaybeSingle).toHaveBeenCalledTimes(2);
+    expect(mocks.attachmentMaybeSingle).toHaveBeenCalledTimes(2);
   });
 
   it("keeps the irreversible deleted result when usage refresh fails after completion", async () => {
@@ -336,7 +553,7 @@ describe("deleteBoardImage", () => {
         },
         error: null,
       });
-    mocks.rpc.mockRejectedValueOnce(new Error("connection reset"));
+    mocks.adminRpc.mockRejectedValueOnce(new Error("connection reset"));
 
     await expect(
       deleteBoardImage({ boardId, attachmentId }),
@@ -369,7 +586,7 @@ describe("deleteBoardImage", () => {
         error: null,
       })
       .mockResolvedValueOnce({ data: null, error: null });
-    mocks.rpc.mockResolvedValueOnce({ data: [], error: null });
+    mocks.adminRpc.mockResolvedValueOnce({ data: [], error: null });
 
     await expect(
       deleteBoardImage({ boardId, attachmentId }),
@@ -409,7 +626,7 @@ describe("deleteBoardImage", () => {
         },
         error: null,
       });
-    mocks.rpc.mockResolvedValueOnce({
+    mocks.adminRpc.mockResolvedValueOnce({
       data: [{
         id: attachmentId,
         owner_id: ownerId,
@@ -431,7 +648,7 @@ describe("deleteBoardImage", () => {
   });
 
   it("does not remove when the saved board revision changed before the claim", async () => {
-    mocks.rpc.mockResolvedValueOnce({
+    mocks.adminRpc.mockResolvedValueOnce({
       data: null,
       error: { code: "P0001", message: "image_board_changed" },
     });
@@ -444,7 +661,7 @@ describe("deleteBoardImage", () => {
     });
 
     expect(mocks.remove).not.toHaveBeenCalled();
-    expect(mocks.adminRpc).not.toHaveBeenCalled();
+    expect(mocks.adminRpc).toHaveBeenCalledTimes(1);
   });
 
   it("revalidates editor, dashboard, public board, and image paths after deletion", async () => {

@@ -15,6 +15,8 @@ add constraint attachments_reservation_state
   );
 
 create or replace function public.finalize_board_image(
+  p_owner_id uuid,
+  p_board_id uuid,
   p_attachment_id uuid,
   p_mime_type text,
   p_actual_size_bytes bigint
@@ -33,18 +35,14 @@ security definer
 set search_path = ''
 as $$
 declare
-  account_id uuid := auth.uid();
   owned_attachment public.attachments%rowtype;
 begin
-  if account_id is null then
-    raise exception 'image_not_found';
-  end if;
-
   select attachments.*
   into owned_attachment
   from public.attachments
   where attachments.id = p_attachment_id
-    and attachments.owner_id = account_id
+    and attachments.board_id = p_board_id
+    and attachments.owner_id = p_owner_id
   for update;
 
   if not found then
@@ -125,6 +123,69 @@ begin
 end;
 $$;
 
+create function private.board_image_storage_insert_allowed(p_name text)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  path_parts text[];
+  path_owner_id uuid;
+  path_board_id uuid;
+  path_attachment_id uuid;
+begin
+  if auth.uid() is null or p_name is null or length(p_name) > 1000 then
+    return false;
+  end if;
+
+  path_parts := string_to_array(p_name, '/');
+  if cardinality(path_parts) <> 3 then
+    return false;
+  end if;
+
+  begin
+    path_owner_id := path_parts[1]::uuid;
+    path_board_id := path_parts[2]::uuid;
+    path_attachment_id := path_parts[3]::uuid;
+  exception
+    when invalid_text_representation then
+      return false;
+  end;
+
+  if path_owner_id <> auth.uid() then
+    return false;
+  end if;
+
+  perform 1
+  from public.boards
+  where boards.id = path_board_id
+    and boards.owner_id = path_owner_id
+    and boards.deletion_started_at is null
+  for key share;
+
+  if not found then
+    return false;
+  end if;
+
+  return exists (
+    select 1
+    from public.attachments
+    where attachments.id = path_attachment_id
+      and attachments.board_id = path_board_id
+      and attachments.owner_id = path_owner_id
+      and attachments.storage_path = p_name
+      and attachments.state = 'reserved'
+      and attachments.reservation_expires_at > now()
+  );
+end;
+$$;
+
+revoke all on function private.board_image_storage_insert_allowed(text)
+from public, anon, authenticated;
+grant execute on function private.board_image_storage_insert_allowed(text)
+to authenticated;
+
 drop policy board_image_reserved_insert on storage.objects;
 create policy board_image_reserved_insert
 on storage.objects
@@ -132,19 +193,7 @@ for insert
 to authenticated
 with check (
   bucket_id = 'board-images'
-  and exists (
-    select 1
-    from public.attachments
-    join public.boards
-      on boards.id = attachments.board_id
-      and boards.owner_id = attachments.owner_id
-    where attachments.owner_id = (select auth.uid())
-      and attachments.storage_path = objects.name
-      and attachments.state = 'reserved'
-      and attachments.reservation_expires_at > now()
-      and boards.deletion_started_at is null
-    for key share of boards
-  )
+  and private.board_image_storage_insert_allowed(objects.name)
 );
 
 create or replace function public.reserve_board_image(
@@ -171,6 +220,7 @@ declare
   active_image_count bigint;
   current_storage_bytes bigint;
   reserved_attachment public.attachments%rowtype;
+  normalized_filename text;
 begin
   if account_id is null then
     raise exception 'image_not_found';
@@ -221,6 +271,13 @@ begin
     raise exception 'image_invalid_mime_type';
   end if;
 
+  normalized_filename :=
+    private.normalize_board_image_filename(p_original_filename);
+
+  if normalized_filename is null then
+    raise exception 'image_invalid_filename';
+  end if;
+
   select count(*)
   into active_image_count
   from public.attachments
@@ -245,7 +302,7 @@ begin
     p_board_id,
     account_id,
     account_id::text || '/' || p_board_id::text || '/' || attachment_id::text,
-    p_original_filename,
+    normalized_filename,
     p_mime_type,
     p_size_bytes,
     'reserved',
@@ -264,7 +321,75 @@ begin
 end;
 $$;
 
+create or replace function public.claim_board_image_cancellation(
+  p_board_id uuid,
+  p_attachment_id uuid
+)
+returns table (
+  id uuid,
+  owner_id uuid,
+  storage_path text,
+  state text
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  account_id uuid := auth.uid();
+  owned_attachment public.attachments%rowtype;
+begin
+  if account_id is null then
+    raise exception 'image_not_found';
+  end if;
+
+  perform 1
+  from public.boards
+  where boards.id = p_board_id
+    and boards.owner_id = account_id
+    and boards.deletion_started_at is null
+  for update;
+
+  if not found then
+    raise exception 'image_not_found';
+  end if;
+
+  select attachments.*
+  into owned_attachment
+  from public.attachments
+  where attachments.id = p_attachment_id
+    and attachments.board_id = p_board_id
+    and attachments.owner_id = account_id
+  for update;
+
+  if not found then
+    raise exception 'image_not_found';
+  end if;
+
+  if owned_attachment.state = 'ready' then
+    raise exception 'image_already_finalized';
+  end if;
+
+  if owned_attachment.state = 'reserved' then
+    update public.attachments
+    set state = 'cancelling'
+    where attachments.id = owned_attachment.id
+    returning * into owned_attachment;
+  elsif owned_attachment.state <> 'cancelling' then
+    raise exception 'image_invalid_state';
+  end if;
+
+  return query
+  select
+    owned_attachment.id,
+    owned_attachment.owner_id,
+    owned_attachment.storage_path,
+    owned_attachment.state;
+end;
+$$;
+
 create function public.claim_board_image_deletion(
+  p_owner_id uuid,
   p_board_id uuid,
   p_attachment_id uuid,
   p_board_revision bigint
@@ -281,20 +406,15 @@ security definer
 set search_path = ''
 as $$
 declare
-  account_id uuid := auth.uid();
   owned_attachment public.attachments%rowtype;
   owned_board public.boards%rowtype;
   next_board_revision bigint;
 begin
-  if account_id is null then
-    raise exception 'image_not_found';
-  end if;
-
   select boards.*
   into owned_board
   from public.boards
   where boards.id = p_board_id
-    and boards.owner_id = account_id
+    and boards.owner_id = p_owner_id
   for update;
 
   if not found then
@@ -312,7 +432,7 @@ begin
   from public.attachments
   where attachments.id = p_attachment_id
     and attachments.board_id = p_board_id
-    and attachments.owner_id = account_id
+    and attachments.owner_id = p_owner_id
   for update;
 
   if not found then
@@ -490,8 +610,10 @@ begin
 end;
 $$;
 
-revoke all on function public.claim_board_image_deletion(uuid, uuid, bigint)
-from public, anon, authenticated;
+revoke all on function public.claim_board_image_deletion(
+  uuid, uuid, uuid, bigint
+)
+from public, anon, authenticated, service_role;
 revoke all on function public.complete_board_image_deletion(uuid, uuid, uuid)
 from public, anon, authenticated, service_role;
 revoke all on function public.claim_board_deletion(uuid)
@@ -499,8 +621,10 @@ from public, anon, authenticated;
 revoke all on function public.complete_board_deletion(uuid, uuid)
 from public, anon, authenticated, service_role;
 
-grant execute on function public.claim_board_image_deletion(uuid, uuid, bigint)
-to authenticated;
+grant execute on function public.claim_board_image_deletion(
+  uuid, uuid, uuid, bigint
+)
+to service_role;
 grant execute on function public.complete_board_image_deletion(uuid, uuid, uuid)
 to service_role;
 grant execute on function public.claim_board_deletion(uuid)

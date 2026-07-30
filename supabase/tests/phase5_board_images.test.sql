@@ -1,6 +1,11 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(107);
+select plan(122);
+
+-- Inline service-role assertions resolve fixture IDs through read-only queries.
+-- This test-only grant is rolled back and is not part of the production schema.
+grant select on public.attachments, public.boards, public.profiles
+to service_role;
 
 select has_function(
   'public',
@@ -13,10 +18,10 @@ select results_eq(
      from pg_proc
      where oid = any(array[
        'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure,
-       'public.finalize_board_image(uuid,text,bigint)'::regprocedure,
+       to_regprocedure('public.finalize_board_image(uuid,uuid,uuid,text,bigint)'),
        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure,
        'public.complete_board_image_cancellation(uuid,uuid,uuid)'::regprocedure,
-       'public.claim_board_image_deletion(uuid,uuid,bigint)'::regprocedure,
+       to_regprocedure('public.claim_board_image_deletion(uuid,uuid,uuid,bigint)'),
        'public.complete_board_image_deletion(uuid,uuid,uuid)'::regprocedure,
        'public.claim_board_deletion(uuid)'::regprocedure,
        'public.complete_board_deletion(uuid,uuid)'::regprocedure
@@ -29,10 +34,10 @@ select results_eq(
      from pg_proc
      where oid = any(array[
        'public.reserve_board_image(uuid,text,text,bigint)'::regprocedure,
-       'public.finalize_board_image(uuid,text,bigint)'::regprocedure,
+       to_regprocedure('public.finalize_board_image(uuid,uuid,uuid,text,bigint)'),
        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure,
        'public.complete_board_image_cancellation(uuid,uuid,uuid)'::regprocedure,
-       'public.claim_board_image_deletion(uuid,uuid,bigint)'::regprocedure,
+       to_regprocedure('public.claim_board_image_deletion(uuid,uuid,uuid,bigint)'),
        'public.complete_board_image_deletion(uuid,uuid,uuid)'::regprocedure,
        'public.claim_board_deletion(uuid)'::regprocedure,
        'public.complete_board_deletion(uuid,uuid)'::regprocedure
@@ -70,8 +75,23 @@ select results_eq(
 select has_function(
   'public',
   'finalize_board_image',
-  array['uuid', 'text', 'bigint'],
-  'image finalization uses an authenticated RPC boundary'
+  array['uuid', 'uuid', 'uuid', 'text', 'bigint'],
+  'image finalization uses an explicit trusted RPC boundary'
+);
+select ok(
+  coalesce(
+    (
+      select
+        not has_function_privilege('authenticated', functions.oid, 'EXECUTE')
+        and has_function_privilege('service_role', functions.oid, 'EXECUTE')
+      from pg_proc as functions
+      where functions.oid = to_regprocedure(
+        'public.finalize_board_image(uuid,uuid,uuid,text,bigint)'
+      )
+    ),
+    false
+  ),
+  'only service_role can finalize a server-verified image'
 );
 select has_function(
   'public',
@@ -106,8 +126,8 @@ select ok(
 select has_function(
   'public',
   'claim_board_image_deletion',
-  array['uuid', 'uuid', 'bigint'],
-  'ready image deletion starts at an authenticated claim boundary'
+  array['uuid', 'uuid', 'uuid', 'bigint'],
+  'ready image deletion starts at an explicit trusted claim boundary'
 );
 select has_function(
   'public',
@@ -116,10 +136,17 @@ select has_function(
   'claimed ready image deletion has an explicit completion boundary'
 );
 select ok(
-  has_function_privilege(
-    'authenticated',
-    'public.claim_board_image_deletion(uuid,uuid,bigint)',
-    'EXECUTE'
+  coalesce(
+    (
+      select
+        not has_function_privilege('authenticated', functions.oid, 'EXECUTE')
+        and has_function_privilege('service_role', functions.oid, 'EXECUTE')
+      from pg_proc as functions
+      where functions.oid = to_regprocedure(
+        'public.claim_board_image_deletion(uuid,uuid,uuid,bigint)'
+      )
+    ),
+    false
   )
   and not has_function_privilege(
     'authenticated',
@@ -136,7 +163,7 @@ select ok(
     'public.complete_board_image_deletion(uuid,uuid,uuid)',
     'EXECUTE'
   ),
-  'only service_role can complete a claimed ready image deletion'
+  'only service_role can claim or complete ready image deletion'
 );
 select ok(
   to_regprocedure('public.delete_board_image_record(uuid)') is null,
@@ -207,17 +234,93 @@ select ok(
 );
 select ok(
   (
-    select
-      position('FOR KEY SHARE' in upper(with_check)) > 0
-      and position(
-        'DELETION_STARTED_AT IS NULL' in upper(with_check)
-      ) > 0
+    select position(
+      'PRIVATE.BOARD_IMAGE_STORAGE_INSERT_ALLOWED(NAME)' in upper(with_check)
+    ) > 0
     from pg_policies
     where schemaname = 'storage'
       and tablename = 'objects'
       and policyname = 'board_image_reserved_insert'
   ),
-  'Storage INSERT locks and excludes a board claimed for deletion'
+  'Storage INSERT delegates admission to the board-first lock helper'
+);
+select has_function(
+  'private',
+  'board_image_storage_insert_allowed',
+  array['text'],
+  'Storage INSERT admission has one dedicated lock helper'
+);
+select ok(
+  position(
+    'FROM PUBLIC.BOARDS' in upper(
+      pg_get_functiondef(
+        to_regprocedure('private.board_image_storage_insert_allowed(text)')
+      )
+    )
+  ) < position(
+    'FOR KEY SHARE' in upper(
+      pg_get_functiondef(
+        to_regprocedure('private.board_image_storage_insert_allowed(text)')
+      )
+    )
+  )
+  and position(
+    'FOR KEY SHARE' in upper(
+      pg_get_functiondef(
+        to_regprocedure('private.board_image_storage_insert_allowed(text)')
+      )
+    )
+  ) < position(
+    'FROM PUBLIC.ATTACHMENTS' in upper(
+      pg_get_functiondef(
+        to_regprocedure('private.board_image_storage_insert_allowed(text)')
+      )
+    )
+  ),
+  'Storage INSERT locks the board relation before inspecting the attachment'
+);
+select ok(
+  position(
+    'FROM PUBLIC.BOARDS' in upper(
+      pg_get_functiondef(
+        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure
+      )
+    )
+  ) < position(
+    'FOR UPDATE' in upper(
+      pg_get_functiondef(
+        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure
+      )
+    )
+  )
+  and position(
+    'FOR UPDATE' in upper(
+      pg_get_functiondef(
+        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure
+      )
+    )
+  ) < position(
+    'FROM PUBLIC.ATTACHMENTS' in upper(
+      pg_get_functiondef(
+        'public.claim_board_image_cancellation(uuid,uuid)'::regprocedure
+      )
+    )
+  ),
+  'cancellation locks board then attachment in the shared lifecycle order'
+);
+select has_function(
+  'private',
+  'normalize_board_image_filename',
+  array['text'],
+  'database filename normalization is centralized'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from pg_constraint
+     where conrelid = 'public.attachments'::regclass
+       and conname = 'attachments_original_filename_boundary' $$,
+  array[1::bigint],
+  'attachments enforce the canonical filename boundary'
 );
 select ok(
   position(
@@ -372,9 +475,34 @@ select set_config(
 select lives_ok(
   $$ select * from public.reserve_board_image(
        '30000000-0000-4000-8000-000000000003',
-       'poster.png', 'image/png', 10485760
+       E'../folder/\nposter.png', 'image/png', 10485760
      ) $$,
   'owner reserves a 10 MB PNG'
+);
+select results_eq(
+  $$ select original_filename
+     from public.attachments
+     where original_filename = 'poster.png' $$,
+  array['poster.png'::text],
+  'the database strips path and control input before storing a filename'
+);
+select results_eq(
+  $$ select char_length(original_filename)
+     from public.reserve_board_image(
+       '30000000-0000-4000-8000-000000000003',
+       repeat('가', 181), 'image/png', 1
+     ) $$,
+  array[180],
+  'direct authenticated reservation cannot store more than 180 code points'
+);
+reset role;
+delete from public.attachments
+where original_filename = repeat('가', 180);
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select storage_path like
@@ -459,12 +587,42 @@ select results_eq(
 );
 select throws_ok(
   $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'poster.png'),
        'image/png', 10485760
      ) $$,
+  '42501', null,
+  'an authenticated caller cannot finalize image metadata directly'
+);
+select set_config(
+  'test.poster_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'poster.png'
+  ),
+  true
+);
+reset role;
+set local role service_role;
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.poster_attachment_id')::uuid,
+       'image/png', 10485760
+     ) $$,
   'P0001', 'image_cancellation_in_progress',
   'finalization cannot race past a cancellation claim'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select results_eq(
   $$ select claimed.storage_path
@@ -499,15 +657,6 @@ select throws_ok(
      where original_filename = 'poster.png' $$,
   '42501', null,
   'an authenticated owner cannot complete a claimed cancellation directly'
-);
-select set_config(
-  'test.poster_attachment_id',
-  (
-    select id::text
-    from public.attachments
-    where original_filename = 'poster.png'
-  ),
-  true
 );
 reset role;
 select results_eq(
@@ -722,20 +871,39 @@ reset role;
 update public.attachments
 set reservation_expires_at = now() - interval '1 second'
 where original_filename = 'expired.png';
+select set_config(
+  'test.expired_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'expired.png'
+  ),
+  true
+);
 set local role authenticated;
 select set_config(
   'request.jwt.claim.sub',
   '10000000-0000-4000-8000-000000000001',
   true
 );
+reset role;
+set local role service_role;
 select throws_ok(
   $$ select * from public.finalize_board_image(
-       (select id from public.attachments
-        where original_filename = 'expired.png'),
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       current_setting('test.expired_attachment_id')::uuid,
        'image/png', 1024
      ) $$,
   'P0001', 'image_reservation_expired',
   'an expired reservation cannot be finalized'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 select throws_ok(
   $$ insert into storage.objects (bucket_id, name, owner_id)
@@ -754,15 +922,6 @@ select lives_ok(
      ) as claimed
      where attachments.original_filename = 'expired.png' $$,
   'an expired reservation can still be claimed for cancellation'
-);
-select set_config(
-  'test.expired_attachment_id',
-  (
-    select id::text
-    from public.attachments
-    where original_filename = 'expired.png'
-  ),
-  true
 );
 reset role;
 set local role service_role;
@@ -809,21 +968,34 @@ select results_eq(
   array[6::bigint],
   'size-growth coverage fills the exact 50 MB account limit'
 );
+select set_config(
+  'test.growth_target_attachment_id',
+  (
+    select id::text
+    from public.attachments
+    where original_filename = 'growth-target.png'
+  ),
+  true
+);
 select results_eq(
   $$ select storage_bytes from public.profiles
      where id = '10000000-0000-4000-8000-000000000001' $$,
   array[52428800::bigint],
   'the exact 50 MB account total is accepted'
 );
+reset role;
+set local role service_role;
 select throws_ok(
   $$ select * from public.finalize_board_image(
-       (select id from public.attachments
-        where original_filename = 'growth-target.png'),
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000005',
+       current_setting('test.growth_target_attachment_id')::uuid,
        'image/png', 10485760
      ) $$,
   'P0001', 'image_quota_exceeded',
   'finalization cannot grow the account beyond 50 MB'
 );
+reset role;
 select results_eq(
   $$ select storage_bytes from public.profiles
      where id = '10000000-0000-4000-8000-000000000001' $$,
@@ -858,6 +1030,21 @@ select lives_ok(
 );
 select throws_ok(
   $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       (select id from public.attachments
+        where original_filename = 'ready.webp'),
+       'image/webp', 2048
+     ) $$,
+  '42501', null,
+  'authenticated callers cannot bypass server byte verification'
+);
+reset role;
+set local role service_role;
+select throws_ok(
+  $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'ready.webp'),
        'image/webp', 0
@@ -867,6 +1054,8 @@ select throws_ok(
 );
 select throws_ok(
   $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'ready.webp'),
        'application/pdf', 2048
@@ -884,6 +1073,8 @@ select results_eq(
   $$ select finalized.state || ':' ||
        finalized.mime_type || ':' || finalized.size_bytes::text
      from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'ready.webp'),
        'image/webp', 2048
@@ -901,6 +1092,8 @@ select results_eq(
   $$ select finalized.state || ':' ||
        finalized.mime_type || ':' || finalized.size_bytes::text
      from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'ready.webp'),
        'image/webp', 2048
@@ -914,6 +1107,13 @@ select results_eq(
   array[2048::bigint],
   'idempotent finalization does not double count bytes'
 );
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
+);
 select throws_ok(
   $$ insert into storage.objects (bucket_id, name, owner_id)
      select 'board-images', storage_path, auth.uid()
@@ -924,6 +1124,24 @@ select throws_ok(
 );
 select throws_ok(
   $$ select * from public.claim_board_image_deletion(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
+       (select id from public.attachments
+        where original_filename = 'ready.webp'),
+       (
+         select revision
+         from public.boards
+         where id = '30000000-0000-4000-8000-000000000003'
+       )
+     ) $$,
+  '42501', null,
+  'authenticated callers cannot bypass the saved Markdown deletion check'
+);
+reset role;
+set local role service_role;
+select throws_ok(
+  $$ select * from public.claim_board_image_deletion(
+       '10000000-0000-4000-8000-000000000001',
        (
          select board_id from public.attachments
          where original_filename = 'ready.webp'
@@ -942,6 +1160,7 @@ select throws_ok(
 );
 select throws_ok(
   $$ select * from public.claim_board_image_deletion(
+       '10000000-0000-4000-8000-000000000001',
        (
          select board_id from public.attachments
          where original_filename = 'ready.webp'
@@ -959,6 +1178,7 @@ select results_eq(
   $$ select claimed.state
      from public.attachments
      cross join lateral public.claim_board_image_deletion(
+       attachments.owner_id,
        attachments.board_id,
        attachments.id,
        (
@@ -973,6 +1193,8 @@ select results_eq(
 );
 select throws_ok(
   $$ select * from public.finalize_board_image(
+       '10000000-0000-4000-8000-000000000001',
+       '30000000-0000-4000-8000-000000000003',
        (select id from public.attachments
         where original_filename = 'ready.webp'),
        'image/webp', 2048
@@ -993,13 +1215,6 @@ select results_eq(
   array[2048::bigint],
   'a deleting ready image remains charged until trusted completion'
 );
-select throws_ok(
-  $$ select public.complete_board_image_deletion(owner_id, board_id, id)
-     from public.attachments
-     where original_filename = 'ready.webp' $$,
-  '42501', null,
-  'an authenticated owner cannot complete ready image deletion directly'
-);
 select set_config(
   'test.ready_attachment_id',
   (
@@ -1008,6 +1223,20 @@ select set_config(
     where original_filename = 'ready.webp'
   ),
   true
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
+);
+select throws_ok(
+  $$ select public.complete_board_image_deletion(owner_id, board_id, id)
+     from public.attachments
+     where original_filename = 'ready.webp' $$,
+  '42501', null,
+  'an authenticated owner cannot complete ready image deletion directly'
 );
 reset role;
 set local role service_role;
@@ -1032,8 +1261,11 @@ select results_eq(
   array[0::bigint],
   'trusted ready image deletion releases its bytes'
 );
+reset role;
+set local role service_role;
 select throws_ok(
   $$ select * from public.claim_board_image_deletion(
+       '10000000-0000-4000-8000-000000000001',
        '30000000-0000-4000-8000-000000000003',
        '30000000-0000-4000-8000-000000000099',
        (
@@ -1044,6 +1276,13 @@ select throws_ok(
      ) $$,
   'P0001', 'image_not_found',
   'claiming an absent ready image returns the generic lifecycle error'
+);
+reset role;
+set local role authenticated;
+select set_config(
+  'request.jwt.claim.sub',
+  '10000000-0000-4000-8000-000000000001',
+  true
 );
 
 select throws_ok(
@@ -1083,6 +1322,23 @@ select lives_ok(
   'authenticated users retain display-name updates'
 );
 
+reset role;
+select throws_ok(
+  $$ insert into public.attachments (
+       id, board_id, owner_id, storage_path, original_filename,
+       mime_type, size_bytes, state, reservation_expires_at
+     ) values (
+       '50000000-0000-4000-8000-000000000099',
+       '30000000-0000-4000-8000-000000000003',
+       '10000000-0000-4000-8000-000000000001',
+       'direct/control-name',
+       E'bad\nname.png',
+       'image/png', 1, 'ready', null
+     ) $$,
+  '23514', null,
+  'the table rejects a noncanonical filename containing a control character'
+);
+set local role authenticated;
 select set_config(
   'request.jwt.claim.sub',
   '20000000-0000-4000-8000-000000000002',
@@ -1160,12 +1416,11 @@ insert into public.attachments (
 update public.profiles
 set storage_bytes = 0
 where id = '10000000-0000-4000-8000-000000000001';
-alter table public.attachments
-enable trigger attachments_apply_storage_delta;
 
-select lives_ok(
+select throws_ok(
   $$ select private.reconcile_board_image_attachments() $$,
-  'legacy attachment reconciliation completes before image constraints'
+  'P0001', 'board_image_migration_unsupported_attachments',
+  'migration preflight aborts when unsupported legacy attachments exist'
 );
 select results_eq(
   $$ select count(*)::bigint
@@ -1174,8 +1429,52 @@ select results_eq(
        and mime_type not in (
          'image/jpeg', 'image/png', 'image/webp', 'image/gif'
        ) $$,
-  array[0::bigint],
-  'legacy non-image attachment metadata is removed explicitly'
+  array[2::bigint],
+  'unsupported legacy metadata remains intact after the actionable abort'
+);
+delete from public.attachments
+where storage_path in ('legacy/document', 'legacy/vector');
+insert into public.attachments (
+  id,
+  board_id,
+  owner_id,
+  storage_path,
+  original_filename,
+  mime_type,
+  size_bytes,
+  state,
+  reservation_expires_at
+)
+select
+  gen_random_uuid(),
+  '30000000-0000-4000-8000-000000000003',
+  '10000000-0000-4000-8000-000000000001',
+  'legacy/over-limit-' || image_number::text,
+  'legacy-' || image_number::text || '.png',
+  'image/png',
+  10485760,
+  'ready',
+  null
+from generate_series(1, 5) as image_number;
+select throws_ok(
+  $$ select private.reconcile_board_image_attachments() $$,
+  'P0001', 'board_image_migration_account_over_quota',
+  'migration preflight aborts when one account exceeds 50 MiB'
+);
+select results_eq(
+  $$ select count(*)::bigint
+     from public.attachments
+     where storage_path like 'legacy/%' $$,
+  array[6::bigint],
+  'over-quota legacy image metadata remains intact after the abort'
+);
+delete from public.attachments
+where storage_path like 'legacy/over-limit-%';
+alter table public.attachments
+enable trigger attachments_apply_storage_delta;
+select lives_ok(
+  $$ select private.reconcile_board_image_attachments() $$,
+  'supported in-quota legacy images pass migration preflight'
 );
 select results_eq(
   $$ select count(*)::bigint
@@ -1218,7 +1517,7 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
-    'public.finalize_board_image(uuid,text,bigint)',
+    'public.finalize_board_image(uuid,uuid,uuid,text,bigint)',
     'EXECUTE'
   )
   and not has_function_privilege(
@@ -1233,7 +1532,7 @@ select ok(
   )
   and not has_function_privilege(
     'anon',
-    'public.claim_board_image_deletion(uuid,uuid,bigint)',
+    'public.claim_board_image_deletion(uuid,uuid,uuid,bigint)',
     'EXECUTE'
   )
   and not has_function_privilege(

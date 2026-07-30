@@ -185,9 +185,17 @@ export async function deleteBoardImage(input: {
     };
   }
 
+  let adminClient;
+  try {
+    adminClient = createAdminSupabaseClient();
+  } catch {
+    return safeError();
+  }
+
   let claimResult;
   try {
-    claimResult = await supabase.rpc("claim_board_image_deletion", {
+    claimResult = await adminClient.rpc("claim_board_image_deletion", {
+      p_owner_id: user.id,
       p_board_id: boardId,
       p_attachment_id: attachmentId,
       p_board_revision: board.data.revision,
@@ -231,12 +239,6 @@ export async function deleteBoardImage(input: {
     });
   }
 
-  let adminClient;
-  try {
-    adminClient = createAdminSupabaseClient();
-  } catch {
-    return safeError(claim.board_revision);
-  }
   let removeResult;
   try {
     removeResult = await adminClient.storage
@@ -264,9 +266,23 @@ export async function deleteBoardImage(input: {
       },
     );
   } catch {
-    return safeError(claim.board_revision);
+    return recoverAmbiguousClaim(supabase, {
+      boardId,
+      attachmentId,
+      ownerId: user.id,
+      storagePath: claim.storage_path,
+      editorPath,
+    });
   }
-  if (completeResult.error) return safeError(claim.board_revision);
+  if (completeResult.error) {
+    return recoverAmbiguousClaim(supabase, {
+      boardId,
+      attachmentId,
+      ownerId: user.id,
+      storagePath: claim.storage_path,
+      editorPath,
+    });
+  }
 
   let storageBytes: number | undefined;
   try {
