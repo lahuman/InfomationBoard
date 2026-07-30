@@ -127,6 +127,7 @@ export function MarkdownContentEditor({
 }: MarkdownContentEditorProps) {
   const rootRef = useRef<HTMLDivElement>(null);
   const sourceRef = useRef<HTMLTextAreaElement>(null);
+  const imageToggleRef = useRef<HTMLButtonElement>(null);
   const controllerRef = useRef<MarkdownEditorController | null>(null);
   const latestValueRef = useRef(value);
   const onChangeRef = useRef(onChange);
@@ -338,6 +339,7 @@ export function MarkdownContentEditor({
       onKeyDown={(event) => {
         if (event.key === "Escape" && imagePanelVisible) {
           setImagePanelVisible(false);
+          imageToggleRef.current?.focus();
         }
       }}
     >
@@ -399,10 +401,12 @@ export function MarkdownContentEditor({
                   aria-controls={imagePanelId}
                   aria-expanded={imagePanelVisible}
                   aria-label="이미지"
+                  className="markdown-image-toggle"
                   data-tooltip="이미지"
                   onClick={() =>
                     setImagePanelVisible((visible) => !visible)
                   }
+                  ref={imageToggleRef}
                   type="button"
                 >
                   <ImageIcon aria-hidden="true" size={18} strokeWidth={2} />

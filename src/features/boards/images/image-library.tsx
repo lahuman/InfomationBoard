@@ -197,6 +197,15 @@ export function ImageLibrary({
   }
 
   async function confirmDelete(image: BoardImage) {
+    if (hasBoardImageReference(contentMarkdown, image.url)) {
+      setDeleteConfirmationId(null);
+      setMessage({
+        kind: "alert",
+        text: "본문에서 이 이미지를 먼저 제거해 주세요.",
+      });
+      return;
+    }
+
     setPendingOperation(image.id);
     setDeleteConfirmationId(null);
     setMessage({ kind: "status", text: "이미지 삭제 중" });
@@ -326,7 +335,7 @@ export function ImageLibrary({
                       value={altText[image.id] ?? ""}
                     />
                   </label>
-                  <label className="image-library-decorative">
+                  <label className="image-library-decorative image-library-decorative-target">
                     <input
                       aria-label={`${image.originalFilename} 장식용 이미지`}
                       checked={decorative}

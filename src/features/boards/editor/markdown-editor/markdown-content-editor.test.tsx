@@ -569,6 +569,7 @@ it.each(["리치 텍스트", "Markdown 원문"])(
     }
     const imageButton = await screen.findByRole("button", { name: "이미지" });
     expect(imageButton).toHaveAttribute("data-tooltip", "이미지");
+    expect(imageButton).toHaveClass("markdown-image-toggle");
     expect(imageButton).toHaveAttribute("aria-expanded", "false");
     expect(imageButton.textContent).toBe("");
     expect(imageButton.querySelector("svg")).toHaveAttribute("aria-hidden", "true");
@@ -608,4 +609,30 @@ it("preserves mounted image library state while the panel is closed", async () =
   fireEvent.click(imageButton);
 
   expect(screen.getByLabelText("라이브러리 로컬 상태")).toHaveValue("변경");
+});
+
+it("returns focus to the image toggle when Escape closes from a panel control", async () => {
+  const editor = createFakeController();
+  render(
+    <MarkdownContentEditor
+      createController={editor.factory}
+      id="board-content"
+      imageLibrary={() => <button type="button">패널 작업</button>}
+      maxLength={200_000}
+      onChange={vi.fn()}
+      value="본문"
+    />,
+  );
+
+  const imageButton = await screen.findByRole("button", { name: "이미지" });
+  fireEvent.click(imageButton);
+  const panelControl = screen.getByRole("button", { name: "패널 작업" });
+  panelControl.focus();
+  expect(panelControl).toHaveFocus();
+
+  fireEvent.keyDown(panelControl, { key: "Escape" });
+
+  expect(screen.getByText("패널 작업")).not.toBeVisible();
+  expect(imageButton).toHaveAttribute("aria-expanded", "false");
+  expect(imageButton).toHaveFocus();
 });

@@ -96,6 +96,12 @@ body {
   cursor: pointer;
 }
 
+.markdown-toolbar .markdown-image-toggle {
+  width: 2.75rem;
+  min-width: 2.75rem;
+  height: 2.75rem;
+}
+
 .markdown-mode-tabs button[aria-selected="true"] {
   background: var(--foreground);
   color: var(--background);
@@ -497,6 +503,12 @@ body {
   display: flex !important;
   grid-template-columns: auto minmax(0, 1fr);
   align-items: center;
+}
+
+.image-library-decorative-target {
+  min-height: 2.75rem;
+  padding: 0.25rem;
+  cursor: pointer;
 }
 
 .image-library-decorative input {

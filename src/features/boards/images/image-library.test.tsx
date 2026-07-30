@@ -109,6 +109,11 @@ describe("ImageLibrary", () => {
     expect(screen.getByText("768 KB")).toBeVisible();
     expect(screen.getByLabelText("poster.png 대체 텍스트")).toHaveValue("poster");
     expect(screen.getByRole("checkbox", { name: "poster.png 장식용 이미지" })).not.toBeChecked();
+    expect(
+      screen
+        .getByRole("checkbox", { name: "poster.png 장식용 이미지" })
+        .closest("label"),
+    ).toHaveClass("image-library-decorative-target");
     expect(screen.getByRole("button", { name: "poster.png 삽입" })).toBeVisible();
     expect(screen.getByRole("button", { name: "poster.png 삭제" })).toBeVisible();
     const thumbnail = container.querySelector(`img[src="${firstImage.url}"]`);
@@ -231,6 +236,39 @@ describe("ImageLibrary", () => {
 
     expect(screen.getByRole("alert")).toHaveTextContent("본문에서 이 이미지를 먼저 제거해 주세요.");
     expect(deleteImageAction).not.toHaveBeenCalled();
+  });
+
+  it("rechecks current Markdown after confirmation before invoking deletion", async () => {
+    const user = userEvent.setup();
+    const rendered = renderLibrary({ contentMarkdown: "# 참조 없음" });
+
+    await user.click(screen.getByRole("button", { name: "poster.png 삭제" }));
+    expect(screen.getByText("poster.png을 삭제할까요?")).toBeVisible();
+
+    rendered.rerender(
+      <ImageLibrary
+        boardId={boardId}
+        boardSlug={boardSlug}
+        cancelImageAction={cancelImageAction}
+        contentMarkdown={`저장 전 변경\n![포스터](${firstImage.url})`}
+        deleteImageAction={deleteImageAction}
+        finalizeImageAction={finalizeImageAction}
+        initialLibrary={{
+          images: [firstImage, secondImage],
+          storageBytes: 1_048_576,
+        }}
+        onBoardRevision={onBoardRevision}
+        onInsert={onInsert}
+        reserveImageAction={reserveImageAction}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "poster.png 삭제 확인" }));
+
+    expect(deleteImageAction).not.toHaveBeenCalled();
+    expect(screen.queryByText("poster.png을 삭제할까요?")).not.toBeInTheDocument();
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "본문에서 이 이미지를 먼저 제거해 주세요.",
+    );
   });
 
   it("confirms before delete and retains the row for in-use or failed results", async () => {

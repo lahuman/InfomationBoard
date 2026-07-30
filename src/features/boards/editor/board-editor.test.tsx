@@ -508,3 +508,66 @@ it("wires the current draft, image lifecycle actions, and deletion revision into
     expect.objectContaining({ revision: 8, title: "삭제 뒤 수정" }),
   );
 });
+
+it("keeps a deletion revision fence when an older in-flight save resolves later", async () => {
+  let resolveOldSave: ((result: UpdateBoardResult) => void) | undefined;
+  const oldSave = new Promise<UpdateBoardResult>((resolve) => {
+    resolveOldSave = resolve;
+  });
+  const update = vi
+    .fn<(input: UpdateBoardInput) => Promise<UpdateBoardResult>>()
+    .mockReturnValueOnce(oldSave)
+    .mockResolvedValueOnce({
+      status: "saved",
+      revision: 5,
+      updatedAt: "2026-07-28T10:03:00.000Z",
+    });
+  render(
+    <BoardEditor
+      {...publicationProps}
+      board={initialBoard}
+      cancelImageAction={vi.fn()}
+      deleteBoardAction={vi.fn()}
+      deleteImageAction={vi.fn()}
+      finalizeImageAction={vi.fn()}
+      initialImageLibrary={initialImageLibrary}
+      reserveImageAction={vi.fn()}
+      updateBoardAction={update}
+    />,
+  );
+
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "먼저 저장 중" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+  expect(update).toHaveBeenCalledWith(
+    expect.objectContaining({ revision: 2, title: "먼저 저장 중" }),
+  );
+
+  fireEvent.click(screen.getByRole("button", { name: "이미지" }));
+  const imageLibraryProps = imageLibraryMocks.component.mock.lastCall?.[0] as {
+    onBoardRevision(revision: number): void;
+  };
+  act(() => imageLibraryProps.onBoardRevision(4));
+
+  await act(async () => {
+    resolveOldSave?.({
+      status: "saved",
+      revision: 3,
+      updatedAt: "2026-07-28T10:02:00.000Z",
+    });
+    await oldSave;
+  });
+  fireEvent.change(screen.getByLabelText("제목"), {
+    target: { value: "삭제 뒤 다음 저장" },
+  });
+  await act(async () => {
+    await vi.advanceTimersByTimeAsync(750);
+  });
+
+  expect(update).toHaveBeenLastCalledWith(
+    expect.objectContaining({ revision: 4, title: "삭제 뒤 다음 저장" }),
+  );
+});

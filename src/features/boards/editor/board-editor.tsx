@@ -165,8 +165,12 @@ export function BoardEditor({
     }
 
     if (result.status === "saved") {
-      revisionRef.current = result.revision;
-      setRevision(result.revision);
+      const nextRevision = Math.max(
+        revisionRef.current,
+        result.revision,
+      );
+      revisionRef.current = nextRevision;
+      setRevision(nextRevision);
       setConflict(null);
 
       const hasNewerDraft =
