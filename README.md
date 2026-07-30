@@ -72,6 +72,13 @@ Never run `supabase db reset --linked`. Remote fixture tests must run inside a
 transaction that rolls back, and must stop before real beta customer data is
 admitted.
 
+Apply all pending migrations before deploying the application. In particular,
+`20260729000100_board_images.sql` creates the private `board-images` bucket,
+atomic account quota accounting, and the reservation/finalization/cancellation
+RPC boundary. `20260730000100_safe_image_board_deletion.sql` adds the claimed
+image and board deletion boundary. Deploying application code before these
+migrations are applied leaves the image workflow unavailable.
+
 ## Hosted authentication configuration
 
 In Supabase Dashboard, configure:
@@ -134,6 +141,39 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
   npm run test:e2e -- tests/e2e/board-owner.spec.ts
 ```
 
+## Board image library
+
+Owners can upload JPEG, PNG, WebP, and GIF images. Each decoded image is limited
+to 10 MB, each board can retain at most 20 active images, and all boards for one
+account share a 50 MB allowance. `profiles.storage_bytes` includes a reservation
+immediately and continues to include `reserved`, transiently `cancelling`, and
+`ready` rows until trusted metadata deletion releases the quota.
+
+Image bytes stay in the private `board-images` bucket. Markdown stores stable
+`/b/[slug]/images/[attachment-id]` URLs, so image delivery inherits the parent
+board's access mode: public images are anonymous, password-board images require
+the scoped access cookie, and private/draft images are available only to their
+owner.
+
+Run the focused local database and live browser checks with:
+
+```bash
+npx supabase test db supabase/tests/phase2_rls.test.sql supabase/tests/phase5_board_images.test.sql
+E2E_LIVE_SUPABASE=1 \
+  npm run test:e2e -- tests/e2e/board-images.spec.ts
+```
+
+The live Playwright setup creates and removes a temporary authenticated owner.
+Alternatively, set `E2E_OWNER_STORAGE_STATE` to an authenticated Playwright
+storage-state file as described above.
+
+Supabase CLI 2.110 currently generates
+`finalize_board_image.reservation_expires_at` as `string` even though a
+successfully finalized SQL row returns `NULL`. Do not hand-edit the generated
+database declaration: the server action validates that ready-state field as
+`null` at runtime, and the generated type should be refreshed when the CLI can
+represent the nullable table-return contract.
+
 ## Publishing, protected access, and QR
 
 Owners can publish a board publicly, protect it with a visitor password, or
@@ -179,6 +219,7 @@ E2E_OWNER_STORAGE_STATE=/absolute/path/to/owner-storage-state.json \
 - `npx supabase migration list --linked`
 - `npx supabase db lint --linked --level error --fail-on error`
 - `npx supabase test db --linked supabase/tests/phase2_rls.test.sql`
+- `npx supabase test db supabase/tests/phase2_rls.test.sql supabase/tests/phase4_publishing.test.sql supabase/tests/phase4_password_access.test.sql supabase/tests/phase5_board_images.test.sql`
 
 On the Docker-free workstation, run all transactional database suites twice:
 
