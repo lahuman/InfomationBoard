@@ -408,15 +408,13 @@ export function BoardEditor({
                     <ImageLibrary
                       boardId={board.id}
                       boardSlug={board.slug}
+                      bridge={imageBridge}
                       cancelImageAction={cancelImageAction}
                       contentMarkdown={draft.contentMarkdown}
                       deleteImageAction={deleteImageAction}
                       finalizeImageAction={finalizeImageAction}
                       initialLibrary={initialImageLibrary}
                       onBoardRevision={applyRevisionFence}
-                      onInsert={(image, alt) =>
-                        imageBridge.applyImage({ image, alt, width: 100 })
-                      }
                       reserveImageAction={reserveImageAction}
                     />
                   )

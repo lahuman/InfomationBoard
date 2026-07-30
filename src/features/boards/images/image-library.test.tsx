@@ -1,6 +1,15 @@
-import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import {
+  act,
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+  within,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import { StrictMode } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import type { ImageEditorBridge } from "../editor/markdown-editor/types";
 import type { CancelBoardImageResult } from "./actions/cancel-image";
 import type { DeleteBoardImageResult } from "./actions/delete-image";
 import type { FinalizeBoardImageResult } from "./actions/finalize-image";
@@ -45,20 +54,31 @@ const cancelImageAction = vi.fn<
 const deleteImageAction = vi.fn<
   (input: { boardId: string; attachmentId: string }) => Promise<DeleteBoardImageResult>
 >();
-const onInsert = vi.fn<(image: BoardImage, alt: string) => boolean>();
+const applyImage = vi.fn<ImageEditorBridge["applyImage"]>();
+const closeImageLibrary = vi.fn();
 const onBoardRevision = vi.fn<(revision: number) => void>();
 
 function renderLibrary(
   options: {
+    bridge?: ImageEditorBridge;
     contentMarkdown?: string;
     initialLibrary?: BoardImageLibrary;
+    strict?: boolean;
     uploadImage?: ImageLibraryProps["uploadImage"];
   } = {},
 ) {
-  return render(
+  const library = (
     <ImageLibrary
       boardId={boardId}
       boardSlug={boardSlug}
+      bridge={
+        options.bridge ?? {
+          open: true,
+          selectedImage: null,
+          applyImage,
+          close: closeImageLibrary,
+        }
+      }
       cancelImageAction={cancelImageAction}
       contentMarkdown={options.contentMarkdown ?? "# 안내"}
       deleteImageAction={deleteImageAction}
@@ -70,16 +90,16 @@ function renderLibrary(
         }
       }
       onBoardRevision={onBoardRevision}
-      onInsert={onInsert}
       reserveImageAction={reserveImageAction}
       uploadImage={options.uploadImage}
-    />,
+    />
   );
+  return render(options.strict ? <StrictMode>{library}</StrictMode> : library);
 }
 
 beforeEach(() => {
   vi.clearAllMocks();
-  onInsert.mockReturnValue(true);
+  applyImage.mockReturnValue(true);
   reserveImageAction.mockResolvedValue({
     status: "error",
     code: "unavailable",
@@ -98,10 +118,77 @@ beforeEach(() => {
 });
 
 describe("ImageLibrary", () => {
-  it("presents the full 50 MB quota and accessible image controls", () => {
+  it("captures an uploaded alt value before React defers the state updater", async () => {
+    const user = userEvent.setup();
+    let resolveUpload: ((result: UploadBoardImageResult) => void) | undefined;
+    const uploadResult = new Promise<UploadBoardImageResult>((resolve) => {
+      resolveUpload = resolve;
+    });
+    const uploadedImage: BoardImage = {
+      id: "50000000-0000-4000-8000-000000000005",
+      originalFilename: "new.gif",
+      mimeType: "image/gif",
+      sizeBytes: 4,
+      url: "/b/summer-market/images/50000000-0000-4000-8000-000000000005",
+    };
+    const reportedErrors: unknown[] = [];
+    const handleWindowError = (event: ErrorEvent) => {
+      reportedErrors.push(event.error);
+      event.preventDefault();
+    };
+    window.addEventListener("error", handleWindowError);
+    renderLibrary({
+      initialLibrary: { images: [], storageBytes: 0 },
+      strict: true,
+      uploadImage: vi.fn(() => uploadResult),
+    });
+    const file = new File([new Uint8Array([1, 2, 3, 4])], "new.gif", {
+      type: "image/gif",
+    });
+
+    let escapedError: unknown;
+    try {
+      await user.upload(screen.getByLabelText("이미지 추가"), file);
+      await act(async () => {
+        resolveUpload?.({
+          status: "ready",
+          image: uploadedImage,
+          storageBytes: 4,
+        });
+        await uploadResult;
+      });
+      const alt = screen.getByLabelText("new.gif 대체 텍스트");
+      await user.clear(alt);
+      await user.type(alt, "새 설명");
+      expect(alt).toHaveValue("새 설명");
+    } catch (error) {
+      escapedError = error;
+    } finally {
+      window.removeEventListener("error", handleWindowError);
+    }
+
+    expect(escapedError).toBeUndefined();
+    expect(reportedErrors).toEqual([]);
+  });
+
+  it("renders no dialog while the editor bridge is closed", () => {
+    renderLibrary({
+      bridge: {
+        open: false,
+        selectedImage: null,
+        applyImage,
+        close: closeImageLibrary,
+      },
+    });
+
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument();
+  });
+
+  it("presents one image management dialog with quota and accessible controls", () => {
     const { container } = renderLibrary();
 
-    expect(screen.getByRole("heading", { name: "이미지 라이브러리" })).toBeVisible();
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
     expect(screen.getByText("1 MB / 50 MB")).toBeVisible();
     expect(screen.getByText("남은 공간 49 MB")).toBeVisible();
     expect(screen.getByText("이미지당 최대 10 MB · 안내판당 최대 20개")).toBeVisible();
@@ -119,6 +206,87 @@ describe("ImageLibrary", () => {
     const thumbnail = container.querySelector(`img[src="${firstImage.url}"]`);
     expect(thumbnail).toHaveAttribute("alt", "");
   });
+
+  it("initializes the matching selected image once without overwriting later field edits", async () => {
+    const user = userEvent.setup();
+    const bridge: ImageEditorBridge = {
+      open: true,
+      selectedImage: {
+        src: firstImage.url,
+        alt: "저장된 포스터 설명",
+        width: 50,
+      },
+      applyImage,
+      close: closeImageLibrary,
+    };
+    const rendered = renderLibrary({ bridge });
+
+    const alt = screen.getByLabelText("poster.png 대체 텍스트");
+    const size = screen.getByRole("group", {
+      name: "poster.png 이미지 크기",
+    });
+    expect(alt).toHaveValue("저장된 포스터 설명");
+    expect(
+      within(size).getByRole("radio", { name: "본문 너비의 50%" }),
+    ).toBeChecked();
+    expect(
+      screen.getByRole("button", { name: "이미지 수정" }),
+    ).toBeVisible();
+
+    await user.clear(alt);
+    await user.type(alt, "사용자가 바꾼 설명");
+    await user.click(
+      within(size).getByRole("radio", { name: "본문 너비의 75%" }),
+    );
+    rendered.rerender(
+      <ImageLibrary
+        boardId={boardId}
+        boardSlug={boardSlug}
+        bridge={bridge}
+        cancelImageAction={cancelImageAction}
+        contentMarkdown="# unrelated rerender"
+        deleteImageAction={deleteImageAction}
+        finalizeImageAction={finalizeImageAction}
+        initialLibrary={{
+          images: [firstImage, secondImage],
+          storageBytes: 1_048_576,
+        }}
+        onBoardRevision={onBoardRevision}
+        reserveImageAction={reserveImageAction}
+      />,
+    );
+
+    expect(alt).toHaveValue("사용자가 바꾼 설명");
+    expect(
+      within(size).getByRole("radio", { name: "본문 너비의 75%" }),
+    ).toBeChecked();
+  });
+
+  it.each([25, 50, 75, 100] as const)(
+    "applies an image at exactly %s percent width",
+    async (width) => {
+      const user = userEvent.setup();
+      renderLibrary();
+      const size = screen.getByRole("group", {
+        name: "poster.png 이미지 크기",
+      });
+
+      await user.click(
+        within(size).getByRole("radio", {
+          name: `본문 너비의 ${width}%`,
+        }),
+      );
+      await user.click(
+        screen.getByRole("button", { name: "poster.png 삽입" }),
+      );
+
+      expect(applyImage).toHaveBeenCalledWith({
+        image: firstImage,
+        alt: "poster",
+        width,
+      });
+    },
+  );
 
   it("appends a ready upload, updates usage, and injects tokenless lifecycle actions", async () => {
     let resolveUpload: ((result: UploadBoardImageResult) => void) | undefined;
@@ -220,12 +388,17 @@ describe("ImageLibrary", () => {
     await user.clear(altInput);
     await user.click(screen.getByRole("button", { name: "poster.png 삽입" }));
     expect(screen.getByRole("alert")).toHaveTextContent("대체 텍스트를 입력하거나 장식용으로 표시해 주세요.");
-    expect(onInsert).not.toHaveBeenCalled();
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
+    expect(applyImage).not.toHaveBeenCalled();
 
     await user.click(screen.getByRole("checkbox", { name: "poster.png 장식용 이미지" }));
     expect(altInput).toBeDisabled();
     await user.click(screen.getByRole("button", { name: "poster.png 삽입" }));
-    expect(onInsert).toHaveBeenCalledWith(firstImage, "");
+    expect(applyImage).toHaveBeenCalledWith({
+      image: firstImage,
+      alt: "",
+      width: 100,
+    });
   });
 
   it("blocks deletion when current unsaved Markdown references the image", async () => {
@@ -235,7 +408,51 @@ describe("ImageLibrary", () => {
     await user.click(screen.getByRole("button", { name: "poster.png 삭제" }));
 
     expect(screen.getByRole("alert")).toHaveTextContent("본문에서 이 이미지를 먼저 제거해 주세요.");
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
     expect(deleteImageAction).not.toHaveBeenCalled();
+  });
+
+  it("replaces management with one delete dialog and restores it with delete-button focus", async () => {
+    const user = userEvent.setup();
+    renderLibrary();
+    const alt = screen.getByLabelText("poster.png 대체 텍스트");
+    const size = screen.getByRole("group", {
+      name: "poster.png 이미지 크기",
+    });
+    await user.clear(alt);
+    await user.type(alt, "삭제를 취소해도 남는 설명");
+    await user.click(
+      within(size).getByRole("radio", { name: "본문 너비의 25%" }),
+    );
+
+    const deleteButton = screen.getByRole("button", {
+      name: "poster.png 삭제",
+    });
+    await user.click(deleteButton);
+
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "이미지 삭제" })).toBeVisible();
+    expect(
+      screen.queryByRole("dialog", { name: "이미지 관리" }),
+    ).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "취소" }));
+
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
+    expect(screen.getByLabelText("poster.png 대체 텍스트")).toHaveValue(
+      "삭제를 취소해도 남는 설명",
+    );
+    expect(
+      within(
+        screen.getByRole("group", { name: "poster.png 이미지 크기" }),
+      ).getByRole("radio", { name: "본문 너비의 25%" }),
+    ).toBeChecked();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "poster.png 삭제" }),
+      ).toHaveFocus(),
+    );
   });
 
   it("rechecks current Markdown after confirmation before invoking deletion", async () => {
@@ -249,6 +466,12 @@ describe("ImageLibrary", () => {
       <ImageLibrary
         boardId={boardId}
         boardSlug={boardSlug}
+        bridge={{
+          open: true,
+          selectedImage: null,
+          applyImage,
+          close: closeImageLibrary,
+        }}
         cancelImageAction={cancelImageAction}
         contentMarkdown={`저장 전 변경\n![포스터](${firstImage.url})`}
         deleteImageAction={deleteImageAction}
@@ -258,7 +481,6 @@ describe("ImageLibrary", () => {
           storageBytes: 1_048_576,
         }}
         onBoardRevision={onBoardRevision}
-        onInsert={onInsert}
         reserveImageAction={reserveImageAction}
       />,
     );
@@ -266,6 +488,7 @@ describe("ImageLibrary", () => {
 
     expect(deleteImageAction).not.toHaveBeenCalled();
     expect(screen.queryByText("poster.png을 삭제할까요?")).not.toBeInTheDocument();
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
     expect(screen.getByRole("alert")).toHaveTextContent(
       "본문에서 이 이미지를 먼저 제거해 주세요.",
     );
@@ -287,10 +510,12 @@ describe("ImageLibrary", () => {
 
     await user.click(screen.getByRole("button", { name: "poster.png 삭제" }));
     expect(screen.getByText("poster.png을 삭제할까요?")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "이미지 삭제" })).toBeVisible();
     expect(deleteImageAction).not.toHaveBeenCalled();
     await user.click(screen.getByRole("button", { name: "poster.png 삭제 확인" }));
     expect(await screen.findByRole("alert")).toHaveTextContent("본문에서 이 이미지를 먼저 제거하고 저장해 주세요.");
     expect(screen.getByText("poster.png")).toBeVisible();
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
 
     await user.click(screen.getByRole("button", { name: "poster.png 삭제" }));
     await user.click(screen.getByRole("button", { name: "poster.png 삭제 확인" }));
@@ -310,7 +535,12 @@ describe("ImageLibrary", () => {
 
     await user.click(screen.getByRole("button", { name: "poster.png 삭제" }));
     await user.click(screen.getByRole("button", { name: "poster.png 삭제 확인" }));
+    expect(screen.getByRole("dialog", { name: "이미지 관리" })).toBeVisible();
     expect(screen.getByText("poster.png")).toBeVisible();
+    expect(deleteImageAction).toHaveBeenCalledWith({
+      boardId,
+      attachmentId: firstImage.id,
+    });
 
     await act(async () => {
       resolveDelete?.({ status: "deleted", storageBytes: 262_144, boardRevision: 8 });
@@ -336,5 +566,57 @@ describe("ImageLibrary", () => {
     expect(screen.getByText("256 KB / 50 MB")).toBeVisible();
     expect(screen.getByRole("status")).toHaveTextContent("이미지를 삭제했습니다.");
     expect(onBoardRevision).toHaveBeenCalledWith(9);
+  });
+
+  it("retains the selected image and edited width after an upload failure", async () => {
+    const user = userEvent.setup();
+    const bridge: ImageEditorBridge = {
+      open: true,
+      selectedImage: {
+        src: firstImage.url,
+        alt: "선택된 포스터",
+        width: 75,
+      },
+      applyImage,
+      close: closeImageLibrary,
+    };
+    renderLibrary({
+      bridge,
+      uploadImage: vi.fn(async () => ({
+        status: "error" as const,
+        message: "이미지를 업로드하지 못했습니다. 다시 시도해 주세요.",
+      })),
+    });
+    const size = screen.getByRole("group", {
+      name: "poster.png 이미지 크기",
+    });
+    await user.click(
+      within(size).getByRole("radio", { name: "본문 너비의 25%" }),
+    );
+
+    await user.upload(
+      screen.getByLabelText("이미지 추가"),
+      new File(["png"], "retry.png", { type: "image/png" }),
+    );
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "다시 시도해 주세요",
+    );
+    expect(
+      screen.getByRole("button", { name: "이미지 수정" }),
+    ).toBeVisible();
+    expect(
+      within(size).getByRole("radio", { name: "본문 너비의 25%" }),
+    ).toBeChecked();
+  });
+
+  it("delegates modal closing to the editor bridge", () => {
+    renderLibrary();
+
+    fireEvent.keyDown(screen.getByRole("dialog", { name: "이미지 관리" }), {
+      key: "Escape",
+    });
+
+    expect(closeImageLibrary).toHaveBeenCalledOnce();
   });
 });

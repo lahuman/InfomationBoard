@@ -6,6 +6,7 @@ import type { PublishBoardResult } from "../actions/publish-board";
 import type { UpdateBoardResult } from "../actions/update-board";
 import type { UpdateBoardInput } from "../schema";
 import type { BoardImage, BoardImageLibrary } from "../images/model";
+import type { ImageEditorBridge } from "./markdown-editor/types";
 
 const routerMocks = vi.hoisted(() => ({
   replace: vi.fn(),
@@ -494,6 +495,12 @@ it("wires the current draft, image lifecycle actions, and deletion revision into
     expect.objectContaining({
       boardId: initialBoard.id,
       boardSlug: initialBoard.slug,
+      bridge: expect.objectContaining({
+        open: true,
+        selectedImage: null,
+        applyImage: expect.any(Function),
+        close: expect.any(Function),
+      }),
       contentMarkdown: "# 저장 전 이미지 초안",
       initialLibrary: initialImageLibrary,
       ...actions,
@@ -502,16 +509,20 @@ it("wires the current draft, image lifecycle actions, and deletion revision into
   );
 
   const imageLibraryProps = imageLibraryMocks.component.mock.lastCall?.[0] as {
+    bridge: ImageEditorBridge;
     onBoardRevision(revision: number): void;
-    onInsert(image: BoardImage, alt: string): boolean;
   };
   let didInsert = false;
   act(() => {
-    didInsert = imageLibraryProps.onInsert(boardImage, "포스터");
+    didInsert = imageLibraryProps.bridge.applyImage({
+      image: boardImage,
+      alt: "포스터",
+      width: 75,
+    });
   });
   expect(didInsert).toBe(true);
   expect(screen.getByLabelText("본문 Markdown 원문")).toHaveValue(
-    '# 저장 전 이미지 초안\n![포스터](/b/summer-night-market/images/11111111-1111-4111-8111-111111111111 "width=100")',
+    '# 저장 전 이미지 초안\n![포스터](/b/summer-night-market/images/11111111-1111-4111-8111-111111111111 "width=75")',
   );
   act(() => imageLibraryProps.onBoardRevision(8));
   fireEvent.change(screen.getByLabelText("제목"), {
